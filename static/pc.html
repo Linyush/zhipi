@@ -1,0 +1,1602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智批 - AI 作业批改系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 主布局：左右分栏 */
+        .main-layout {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* 左侧：计划列表 */
+        .plan-sidebar {
+            width: 280px;
+            background: white;
+            border-right: 1px solid #ddd;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .plan-sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid #ddd;
+            background: #4CAF50;
+            color: white;
+        }
+
+        .plan-sidebar-header h1 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .plan-sidebar-toolbar {
+            display: flex;
+            gap: 5px;
+        }
+
+        .plan-sidebar-toolbar button {
+            flex: 1;
+            padding: 6px;
+            font-size: 12px;
+        }
+
+        .plan-list-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .plan-item {
+            padding: 10px;
+            margin-bottom: 8px;
+            background: #f9f9f9;
+            border: 2px solid transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            gap: 8px;
+        }
+
+        .plan-item:hover {
+            background: #f0f0f0;
+        }
+
+        .plan-item.active {
+            background: #e8f5e9;
+            border-color: #4CAF50;
+        }
+
+        .plan-item-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .plan-item-name {
+            font-weight: bold;
+            font-size: 13px;
+            margin-bottom: 4px;
+            color: #333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .plan-item-meta {
+            font-size: 10px;
+            color: #666;
+            margin-bottom: 3px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .plan-item-desc {
+            font-size: 10px;
+            color: #999;
+            line-height: 1.4;
+            max-height: 28px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+        }
+
+        /* 计划操作链接（仅在选中时显示） */
+        .plan-actions {
+            display: none;
+            flex-direction: column;
+            gap: 2px;
+            justify-content: flex-start;
+            padding-top: 2px;
+        }
+
+        .plan-item.active .plan-actions {
+            display: flex;
+        }
+
+        .plan-actions a {
+            font-size: 10px;
+            color: #4CAF50;
+            text-decoration: none;
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 2px;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .plan-actions a:hover {
+            background: #4CAF50;
+            color: white;
+        }
+
+        /* 二维码悬浮显示 */
+        .qrcode-hover-container {
+            position: relative;
+        }
+
+        .qrcode-popup {
+            display: none;
+            position: fixed;
+            background: white;
+            border: 2px solid #4CAF50;
+            border-radius: 8px;
+            padding: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            width: 200px;
+            pointer-events: none;
+        }
+
+        .qrcode-popup img {
+            width: 100%;
+            display: block;
+            border-radius: 4px;
+        }
+
+        .qrcode-popup-title {
+            font-size: 11px;
+            color: #666;
+            text-align: center;
+            margin-top: 6px;
+            line-height: 1.3;
+        }
+
+        /* 计划列表容器 */
+        .plan-list-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        /* 右侧：批改任务区域 */
+        .records-area {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            background: white;
+        }
+
+        .records-area.active {
+            display: flex;
+        }
+
+        .records-header {
+            padding: 20px;
+            border-bottom: 1px solid #ddd;
+            background: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .records-header h2 {
+            font-size: 20px;
+            color: #333;
+        }
+
+        .records-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .record-item {
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .record-item:hover {
+            background: #f9f9f9;
+        }
+
+        .record-item.active {
+            background: #e3f2fd;
+        }
+
+        .record-header {
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .record-title {
+            font-weight: bold;
+            color: #333;
+        }
+
+        .record-meta {
+            font-size: 12px;
+            color: #666;
+            margin-top: 4px;
+        }
+
+        .record-status {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: bold;
+        }
+
+        .status-pending { background: #fff3cd; color: #856404; }
+        .status-processing { background: #cfe2ff; color: #084298; }
+        .status-done { background: #d1e7dd; color: #0f5132; }
+        .status-failed { background: #f8d7da; color: #842029; }
+
+        /* 记录详情（展开内容） */
+        .record-detail {
+            display: none;
+            padding: 15px;
+            background: #f9f9f9;
+            border-top: 1px solid #ddd;
+        }
+
+        .record-detail.active {
+            display: block;
+        }
+
+        /* 详情网格：批改结果 + 图片&识别内容 */
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 3fr 1.5fr;
+            gap: 15px;
+        }
+
+        .detail-column {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .detail-column-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #ddd;
+            flex-shrink: 0;
+        }
+
+        .detail-column-result .detail-column-title {
+            border-bottom-color: #4CAF50;
+            font-size: 16px;
+        }
+
+        .detail-column-ocr .detail-column-title {
+            border-bottom-color: #2196F3;
+        }
+
+        .detail-column-images .detail-column-title {
+            border-bottom-color: #FF9800;
+        }
+
+        .detail-column-content {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        /* 图片缩略图容器 */
+        .images-thumbnails {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .images-thumbnails img {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: cover;
+            border-radius: 4px;
+            cursor: pointer;
+            border: 2px solid #ddd;
+            transition: all 0.2s;
+        }
+
+        .images-thumbnails img:hover {
+            border-color: #FF9800;
+            transform: scale(1.05);
+        }
+
+        /* 识别内容区域 */
+        .ocr-content {
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .ocr-content-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: #666;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .ocr-content pre {
+            white-space: pre-wrap;
+            font-size: 12px;
+            line-height: 1.5;
+            margin: 0;
+            color: #333;
+        }
+
+        .detail-actions {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 10px;
+        }
+
+        /* 按钮样式 */
+        button {
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        button.secondary {
+            background: #2196F3;
+        }
+
+        button.secondary:hover {
+            background: #0b7dda;
+        }
+
+        button.danger {
+            background: #f44336;
+        }
+
+        button.danger:hover {
+            background: #da190b;
+        }
+
+        button.small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        /* 模态框 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        .modal-footer {
+            margin-top: 20px;
+            text-align: right;
+        }
+
+        .modal-footer button {
+            margin-left: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        textarea {
+            min-height: 300px;
+            font-family: monospace;
+            resize: vertical;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        /* Markdown 样式 */
+        .result-content h1, .result-content h2, .result-content h3, .result-content h4 {
+            margin-top: 15px;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        .result-content h1 { font-size: 20px; border-bottom: 2px solid #4CAF50; padding-bottom: 6px; }
+        .result-content h2 { font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+        .result-content h3 { font-size: 16px; }
+        .result-content h4 { font-size: 14px; }
+
+        .result-content p {
+            margin: 8px 0;
+            line-height: 1.7;
+        }
+
+        .result-content ul, .result-content ol {
+            margin: 8px 0;
+            padding-left: 25px;
+            line-height: 1.7;
+        }
+
+        .result-content li {
+            margin: 4px 0;
+        }
+
+        .result-content code {
+            background: #f5f5f5;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #e91e63;
+        }
+
+        .result-content pre {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+
+        .result-content pre code {
+            background: transparent;
+            padding: 0;
+            color: #333;
+        }
+
+        .result-content blockquote {
+            border-left: 4px solid #4CAF50;
+            padding-left: 12px;
+            margin: 8px 0;
+            color: #666;
+        }
+
+        .result-content strong {
+            font-weight: bold;
+        }
+
+        .result-content a {
+            color: #2196F3;
+            text-decoration: none;
+        }
+
+        .result-content a:hover {
+            text-decoration: underline;
+        }
+
+        /* 空状态占位 */
+        .empty-placeholder {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+        }
+
+        /* 图片浏览器模态框 */
+        .image-viewer-modal {
+            background: rgba(0, 0, 0, 0.95);
+        }
+
+        .image-viewer-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .image-viewer-container img {
+            max-width: 90%;
+            max-height: 90vh;
+            object-fit: contain;
+            user-select: none;
+        }
+
+        .image-viewer-close {
+            position: absolute;
+            top: 20px;
+            right: 30px;
+            font-size: 40px;
+            color: white;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0;
+            width: 50px;
+            height: 50px;
+            line-height: 50px;
+            text-align: center;
+            z-index: 1001;
+        }
+
+        .image-viewer-close:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 50%;
+        }
+
+        .image-viewer-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 60px;
+            color: white;
+            background: rgba(0, 0, 0, 0.3);
+            border: none;
+            cursor: pointer;
+            padding: 20px;
+            width: 80px;
+            height: 80px;
+            line-height: 40px;
+            text-align: center;
+            transition: background 0.3s;
+            z-index: 1001;
+        }
+
+        .image-viewer-nav:hover {
+            background: rgba(0, 0, 0, 0.6);
+        }
+
+        .image-viewer-nav:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .image-viewer-prev {
+            left: 20px;
+        }
+
+        .image-viewer-next {
+            right: 20px;
+        }
+
+        .image-viewer-counter {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 1001;
+        }
+    </style>
+</head>
+<body>
+    <!-- 主布局 -->
+    <div class="main-layout">
+        <!-- 左侧：计划列表 -->
+        <div class="plan-sidebar">
+            <div class="plan-sidebar-header">
+                <h1>智批</h1>
+                <div class="plan-sidebar-toolbar">
+                    <button class="small" onclick="showCreatePlanModal()">➕ 新建</button>
+                    <button class="small secondary" onclick="loadPlans()">🔄 刷新</button>
+                </div>
+            </div>
+            <div class="plan-list-container" id="planList">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <!-- 右侧：批改任务列表 + 详情 -->
+        <div class="records-area" id="recordsArea">
+            <div class="records-header">
+                <h2 id="currentPlanTitle">批改计划</h2>
+                <button class="small secondary" onclick="refreshRecords()">🔄 刷新记录</button>
+            </div>
+            <div class="records-list" id="recordsList">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+
+        <!-- 空状态占位 -->
+        <div id="emptyPlaceholder" class="empty-placeholder">
+            <div>
+                <p style="font-size: 48px; margin-bottom: 20px;">📋</p>
+                <p style="font-size: 18px;">请选择一个批改计划</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建计划模态框 -->
+    <div id="createPlanModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">创建批改计划</div>
+            <div class="form-group">
+                <label>计划名称:</label>
+                <input type="text" id="newPlanName" placeholder="例如：语文作业第一单元">
+            </div>
+            <div class="form-group">
+                <label>计划描述:</label>
+                <input type="text" id="newPlanDescription" placeholder="简短描述这个批改计划（30字以内）">
+            </div>
+            <div class="form-group">
+                <label>批改要求:</label>
+                <textarea id="newPlanPrompt" placeholder="请输入批改要求...&#10;&#10;例如：&#10;你是一名耐心且专业的小学四年级语文老师。请仔细查看学生提交的作业图片，并提供详细的批改意见。"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('createPlanModal')">取消</button>
+                <button onclick="createPlan()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑 Prompt 模态框 -->
+    <div id="editPromptModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">编辑批改要求</div>
+            <div class="form-group">
+                <label>批改要求:</label>
+                <textarea id="editPromptText"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('editPromptModal')">取消</button>
+                <button onclick="updatePrompt()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 查看上一次批改结果模态框 -->
+    <div id="previousResultModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">📜 上一次批改结果</div>
+            <div id="previousResultContent" class="result-content"></div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('previousResultModal')">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 图片浏览器模态框 -->
+    <div id="imageViewerModal" class="modal image-viewer-modal">
+        <div class="image-viewer-container">
+            <button class="image-viewer-close" onclick="closeImageViewer()">✕</button>
+            <button class="image-viewer-nav image-viewer-prev" onclick="prevImage()">‹</button>
+            <button class="image-viewer-nav image-viewer-next" onclick="nextImage()">›</button>
+            <img id="imageViewerImg" src="" alt="作业图片">
+            <div class="image-viewer-counter">
+                <span id="imageViewerCounter">1 / 1</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义提示框 -->
+    <div id="customAlertModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header" id="customAlertTitle">提示</div>
+            <div id="customAlertMessage" style="padding: 20px 0; line-height: 1.6; color: #333;"></div>
+            <div class="modal-footer" style="text-align: center;">
+                <button onclick="closeCustomAlert()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义确认框 -->
+    <div id="customConfirmModal" class="modal">
+        <div class="modal-content" style="max-width: 400px;">
+            <div class="modal-header" id="customConfirmTitle">确认</div>
+            <div id="customConfirmMessage" style="padding: 20px 0; line-height: 1.6; color: #333;"></div>
+            <div class="modal-footer" style="text-align: center;">
+                <button class="secondary" onclick="cancelCustomConfirm()">取消</button>
+                <button onclick="confirmCustomConfirm()">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let currentPlan = null;
+        let autoRefreshInterval = null;
+        let currentExpandedRecordId = null;
+        let lastRecordsData = null; // 缓存上次的记录数据
+
+        // 图片浏览器相关变量
+        let currentImages = []; // 当前记录的所有图片
+        let currentImageIndex = 0; // 当前显示的图片索引
+
+        // 初始化
+        window.onload = function() {
+            loadPlans();
+            // 恢复上次的选择状态
+            restoreState();
+            // 添加键盘事件监听
+            document.addEventListener('keydown', handleKeyPress);
+        };
+
+        // 保存状态到 localStorage
+        function saveState() {
+            const state = {
+                planName: currentPlan ? currentPlan.plan_name : null,
+                expandedRecordId: currentExpandedRecordId
+            };
+            localStorage.setItem('homeworkGradingState', JSON.stringify(state));
+        }
+
+        // 恢复状态
+        function restoreState() {
+            try {
+                const stateJson = localStorage.getItem('homeworkGradingState');
+                if (stateJson) {
+                    const state = JSON.parse(stateJson);
+                    if (state.planName) {
+                        // 延迟一下，等待计划列表加载完成
+                        setTimeout(() => {
+                            selectPlan(state.planName);
+                            if (state.expandedRecordId) {
+                                currentExpandedRecordId = state.expandedRecordId;
+                            }
+                        }, 500);
+                    }
+                }
+            } catch (error) {
+                console.error('恢复状态失败:', error);
+            }
+        }
+
+        // 加载计划列表
+        async function loadPlans() {
+            try {
+                const response = await fetch(`${API_BASE}/plans`);
+                const data = await response.json();
+                displayPlans(data.plans);
+            } catch (error) {
+                console.error('加载计划失败:', error);
+                document.getElementById('planList').innerHTML = '<div class="empty-state">加载失败</div>';
+            }
+        }
+
+        // 显示计划列表
+        function displayPlans(plans) {
+            const container = document.getElementById('planList');
+            if (plans.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无计划<br>点击新建创建</div>';
+                return;
+            }
+
+            container.innerHTML = plans.map(plan => {
+                const isActive = currentPlan && currentPlan.plan_name === plan.plan_name;
+
+                // 格式化日期
+                let dateStr = '';
+                if (plan.created_at) {
+                    try {
+                        const date = new Date(plan.created_at);
+                        dateStr = date.toLocaleDateString('zh-CN', {
+                            year: 'numeric',
+                            month: '2-digit',
+                            day: '2-digit'
+                        }).replace(/\//g, '-');
+                    } catch (e) {
+                        dateStr = '';
+                    }
+                }
+
+                // 截取描述字段（如果没有则显示暂无描述）
+                const desc = plan.description ? (plan.description.length > 30 ? plan.description.substring(0, 30) + '...' : plan.description) : '暂无描述';
+
+                return `
+                <div class="plan-item ${isActive ? 'active' : ''}" onclick="selectPlan('${plan.plan_name}')">
+                    <!-- 左侧内容 -->
+                    <div class="plan-item-content">
+                        <div class="plan-item-name">${plan.plan_name}</div>
+                        <div class="plan-item-meta">
+                            <span>记录: ${plan.record_count} 条</span>
+                            ${dateStr ? `<span>${dateStr}</span>` : ''}
+                        </div>
+                        <div class="plan-item-desc">${desc}</div>
+                    </div>
+
+                    <!-- 右侧操作链接（仅选中时显示） -->
+                    <div class="plan-actions">
+                        <div class="qrcode-hover-container" onmouseenter="showQRCodePopup(event, '${plan.plan_name}')" onmouseleave="hideQRCodePopup()">
+                            <a>扫码录入</a>
+                            <div class="qrcode-popup" id="qrcode-popup-${plan.plan_name}">
+                                <img src="${API_BASE}/plans/${encodeURIComponent(plan.plan_name)}/qrcode" alt="二维码">
+                                <div class="qrcode-popup-title">扫码上传作业</div>
+                            </div>
+                        </div>
+                        <a onclick="event.stopPropagation(); showEditPromptModal()">批改要求</a>
+                        <a onclick="event.stopPropagation(); batchRegrade()">重新批改</a>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        // 选择计划
+        async function selectPlan(planName) {
+            try {
+                const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(planName)}`);
+                const data = await response.json();
+                currentPlan = data.plan;
+
+                // 更新标题
+                document.getElementById('currentPlanTitle').textContent = planName;
+
+                // 显示右侧区域
+                document.getElementById('emptyPlaceholder').style.display = 'none';
+                document.getElementById('recordsArea').classList.add('active');
+
+                // 加载记录
+                loadRecords();
+
+                // 启动自动刷新（1秒）
+                startAutoRefresh();
+
+                // 更新计划列表选中状态
+                loadPlans();
+
+                // 保存状态
+                saveState();
+            } catch (error) {
+                console.error('加载计划详情失败:', error);
+                showAlert('加载计划失败', '错误');
+            }
+        }
+
+        // 显示二维码模态框
+        function showQRCodeModal() {
+            if (!currentPlan) {
+                showAlert('请先选择一个批改计划', '提示');
+                return;
+            }
+
+            const qrcodeUrl = `${API_BASE}/plans/${encodeURIComponent(currentPlan.plan_name)}/qrcode`;
+            document.getElementById('qrcodeModalContent').innerHTML = `
+                <img src="${qrcodeUrl}" alt="二维码" style="width: 100%; max-width: 300px; border: 2px solid #ddd; border-radius: 6px;">
+            `;
+            showModal('qrcodeModal');
+        }
+
+        // 加载记录列表
+        async function loadRecords() {
+            if (!currentPlan) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/records/${encodeURIComponent(currentPlan.plan_name)}`);
+                const data = await response.json();
+
+                // 智能更新：只在数据变化时更新
+                if (hasRecordsChanged(data.records)) {
+                    displayRecords(data.records);
+                    lastRecordsData = JSON.stringify(data.records);
+                } else if (currentExpandedRecordId) {
+                    // 即使列表没变化，也更新展开记录的详情（因为状态可能变化）
+                    silentUpdateExpandedRecord();
+                }
+            } catch (error) {
+                console.error('加载记录失败:', error);
+                document.getElementById('recordsList').innerHTML = '<div class="empty-state">加载失败</div>';
+            }
+        }
+
+        // 检查记录是否有变化
+        function hasRecordsChanged(newRecords) {
+            if (!lastRecordsData) return true;
+            const newData = JSON.stringify(newRecords);
+            return lastRecordsData !== newData;
+        }
+
+        // 静默更新展开记录（不重新渲染列表，避免滚动位置丢失）
+        async function silentUpdateExpandedRecord() {
+            if (!currentExpandedRecordId) return;
+
+            const detailDiv = document.getElementById(`detail-${currentExpandedRecordId}`);
+            if (!detailDiv || !detailDiv.classList.contains('active')) return;
+
+            // 保存滚动位置
+            const scrollPositions = saveScrollPositions();
+
+            try {
+                const response = await fetch(`${API_BASE}/records/${encodeURIComponent(currentPlan.plan_name)}/${currentExpandedRecordId}`);
+                const data = await response.json();
+                const record = data.record;
+
+                // 更新详情内容
+                detailDiv.innerHTML = generateDetailHTML(record, currentExpandedRecordId);
+
+                // 恢复滚动位置
+                restoreScrollPositions(scrollPositions);
+            } catch (error) {
+                console.error('静默更新详情失败:', error);
+            }
+        }
+
+        // 保存所有滚动位置
+        function saveScrollPositions() {
+            const positions = {};
+            const containers = document.querySelectorAll('.detail-column-content');
+            containers.forEach((container, index) => {
+                positions[index] = container.scrollTop;
+            });
+            return positions;
+        }
+
+        // 恢复滚动位置
+        function restoreScrollPositions(positions) {
+            setTimeout(() => {
+                const containers = document.querySelectorAll('.detail-column-content');
+                containers.forEach((container, index) => {
+                    if (positions[index] !== undefined) {
+                        container.scrollTop = positions[index];
+                    }
+                });
+            }, 0);
+        }
+
+        // 显示记录列表
+        function displayRecords(records) {
+            const container = document.getElementById('recordsList');
+
+            if (records.length === 0) {
+                container.innerHTML = '<div class="empty-state">暂无批改记录</div>';
+                currentExpandedRecordId = null;
+                return;
+            }
+
+            container.innerHTML = records.map(record => `
+                <div class="record-item ${currentExpandedRecordId === record.id ? 'active' : ''}" onclick="toggleRecord('${record.id}')">
+                    <div class="record-header">
+                        <div>
+                            <div class="record-title">学生: ${record.student}</div>
+                            <div class="record-meta">
+                                ${new Date(record.created_at).toLocaleString('zh-CN')}
+                                ${record.regrade_count > 0 ? ` | 重批 ${record.regrade_count} 次` : ''}
+                            </div>
+                        </div>
+                        <span class="record-status status-${record.status}">${getStatusText(record.status)}</span>
+                    </div>
+                    <div id="detail-${record.id}" class="record-detail"></div>
+                </div>
+            `).join('');
+
+            // 如果有展开的记录，重新加载其详情
+            if (currentExpandedRecordId) {
+                const detailDiv = document.getElementById(`detail-${currentExpandedRecordId}`);
+                if (detailDiv) {
+                    reloadRecordDetail(currentExpandedRecordId);
+                }
+            }
+        }
+
+        // 生成详情 HTML（提取为函数以便复用）
+        function generateDetailHTML(record, recordId) {
+            let html = '<div class="detail-grid">';
+
+            // 第一列：批改结果（最大）
+            html += '<div class="detail-column detail-column-result">';
+            html += '<div class="detail-column-title">✅ 批改结果</div>';
+            html += '<div class="detail-column-content">';
+            if (record.result) {
+                html += `<div class="result-content">${marked.parse(record.result)}</div>`;
+            } else if (record.error) {
+                html += `<div style="color: red;"><strong>错误:</strong> ${record.error}</div>`;
+            } else {
+                html += '<div style="color: #999;">暂无批改结果</div>';
+            }
+            html += '</div></div>';
+
+            // 第二列：图片 + 识别内容
+            html += '<div class="detail-column detail-column-images">';
+            html += '<div class="detail-column-title">📷 图片 & 识别内容</div>';
+            html += '<div class="detail-column-content">';
+
+            // 图片缩略图
+            if (record.images && record.images.length > 0) {
+                html += '<div class="images-thumbnails">';
+                // 生成所有图片的 URL 数组
+                const imageUrls = record.images.map(img => `${API_BASE}/data/${currentPlan.plan_name}/${img}`);
+                const imageUrlsJson = JSON.stringify(imageUrls).replace(/"/g, '&quot;');
+
+                record.images.forEach((img, index) => {
+                    const imgUrl = `${API_BASE}/data/${currentPlan.plan_name}/${img}`;
+                    html += `<img src="${imgUrl}" onclick="event.stopPropagation(); openImageViewer(JSON.parse('${imageUrlsJson}'), ${index})" alt="作业图片" title="点击查看大图">`;
+                });
+                html += '</div>';
+            } else {
+                html += '<div style="color: #999; margin-bottom: 15px;">无图片</div>';
+            }
+
+            // 识别内容
+            html += '<div class="ocr-content">';
+            html += '<div class="ocr-content-title">图片内容识别</div>';
+            if (record.ocr_text) {
+                html += `<pre>${record.ocr_text}</pre>`;
+            } else {
+                html += '<div style="color: #999; font-size: 12px;">暂无识别结果</div>';
+            }
+            html += '</div>';
+
+            html += '</div></div>';
+
+            html += '</div>'; // end detail-grid
+
+            // 操作按钮
+            html += '<div class="detail-actions">';
+            if (record.previous_result) {
+                html += `<button class="small secondary" onclick="event.stopPropagation(); showPreviousResult('${recordId}')">📜 查看上次批改</button>`;
+            }
+            html += `<button class="small danger" onclick="event.stopPropagation(); deleteRecord('${recordId}')">🗑️ 删除</button>`;
+            html += '</div>';
+
+            return html;
+        }
+
+        // 重新加载记录详情（用于自动刷新时保持展开状态）
+        async function reloadRecordDetail(recordId) {
+            const detailDiv = document.getElementById(`detail-${recordId}`);
+            if (!detailDiv) return;
+
+            // 保存滚动位置
+            const scrollPositions = saveScrollPositions();
+
+            try {
+                const response = await fetch(`${API_BASE}/records/${encodeURIComponent(currentPlan.plan_name)}/${recordId}`);
+                const data = await response.json();
+                const record = data.record;
+
+                detailDiv.innerHTML = generateDetailHTML(record, recordId);
+                detailDiv.classList.add('active');
+
+                // 恢复滚动位置
+                restoreScrollPositions(scrollPositions);
+            } catch (error) {
+                console.error('重新加载详情失败:', error);
+            }
+        }
+
+        // 切换记录详情
+        async function toggleRecord(recordId) {
+            const detailDiv = document.getElementById(`detail-${recordId}`);
+
+            // 如果已展开，则收起
+            if (currentExpandedRecordId === recordId) {
+                detailDiv.classList.remove('active');
+                currentExpandedRecordId = null;
+                // 更新样式
+                updateRecordItemActiveState();
+                // 保存状态
+                saveState();
+                return;
+            }
+
+            // 收起之前展开的记录
+            if (currentExpandedRecordId) {
+                const prevDetailDiv = document.getElementById(`detail-${currentExpandedRecordId}`);
+                if (prevDetailDiv) {
+                    prevDetailDiv.classList.remove('active');
+                }
+            }
+
+            // 展开新的记录
+            currentExpandedRecordId = recordId;
+
+            try {
+                const response = await fetch(`${API_BASE}/records/${encodeURIComponent(currentPlan.plan_name)}/${recordId}`);
+                const data = await response.json();
+                const record = data.record;
+
+                detailDiv.innerHTML = generateDetailHTML(record, recordId);
+                detailDiv.classList.add('active');
+
+                // 更新记录项的 active 样式
+                updateRecordItemActiveState();
+
+                // 保存状态
+                saveState();
+            } catch (error) {
+                console.error('加载详情失败:', error);
+                detailDiv.innerHTML = '<div style="color: red; padding: 10px;">加载失败</div>';
+                detailDiv.classList.add('active');
+            }
+        }
+
+        // 更新记录项的 active 状态
+        function updateRecordItemActiveState() {
+            document.querySelectorAll('.record-item').forEach(item => {
+                const recordId = item.getAttribute('onclick')?.match(/'([^']+)'/)?.[1];
+                if (recordId === currentExpandedRecordId) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+        }
+
+        // 显示上一次批改结果
+        async function showPreviousResult(recordId) {
+            try {
+                const response = await fetch(`${API_BASE}/records/${encodeURIComponent(currentPlan.plan_name)}/${recordId}`);
+                const data = await response.json();
+                const record = data.record;
+
+                if (record.previous_result) {
+                    document.getElementById('previousResultContent').innerHTML = marked.parse(record.previous_result);
+                    showModal('previousResultModal');
+                }
+            } catch (error) {
+                console.error('加载历史结果失败:', error);
+            }
+        }
+
+        // 删除记录
+        async function deleteRecord(recordId) {
+            showConfirm('确定要删除这条记录吗？删除后无法恢复！', async (confirmed) => {
+                if (!confirmed) return;
+
+                try {
+                    const response = await fetch(`${API_BASE}/records/${encodeURIComponent(currentPlan.plan_name)}/${recordId}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        showAlert('删除成功');
+                        currentExpandedRecordId = null;
+                        loadRecords();
+                    } else {
+                        const error = await response.json();
+                        showAlert('删除失败: ' + (error.detail || '未知错误'), '错误');
+                    }
+                } catch (error) {
+                    console.error('删除记录失败:', error);
+                    showAlert('删除失败', '错误');
+                }
+            });
+        }
+
+        // 创建计划
+        function showCreatePlanModal() {
+            document.getElementById('newPlanName').value = '';
+            document.getElementById('newPlanDescription').value = '';
+
+            // 设置默认 Prompt
+            const defaultPrompt = `角色设定：
+你是一名专业、严谨、耐心的「道法（道德与法治）作业批改老师」，熟悉义务教育阶段道德与法治课程标准与答题要求。
+
+任务说明：
+我将提供 OCR 识别后的作业文字。请你执行以下步骤：
+
+1. 文本整理
+   - 按题号顺序整理提供的文本
+   - 明确区分每道题的"题目内容"和"学生答案"
+   - 保留题号、分段和原有书写逻辑
+   - 不随意改写原文
+
+2. 批改要求
+   - 判断每题答案：正确 / 部分正确 / 错误
+   - 给出简短建议或标准答案
+   - 语言简洁、适合中小学生理解
+   - 保持耐心、鼓励、尊重的老师口吻
+
+3. 输出结构(markdown 格式，格式清晰，每道题之间有换行)
+
+一、每道题批改结果（直接输出每题）
+题目1：正确/部分正确/错误(正确使用绿色字体，部分正确使用橙色字体，错误使用暗红色字体)
+学生答案：xxx
+标准答案 / 建议：xxx
+
+题目2：正确/部分正确/错误(正确使用绿色字体，部分正确使用黄色字体，错误使用红色字体)
+学生答案：xxx
+标准答案 / 建议：xxx
+...
+
+二、综合分析
+正确之处：
+1. ...
+2. ...
+
+存在问题：
+1. ...
+2. ...
+
+改进建议：
+1. ...
+2. ...
+
+4. 评分（可选）
+- 按 100 分制给分
+- 等级：A / B / C / D
+- 简述扣分原因
+
+5. 语言风格
+- 老师批改口吻
+- 先肯定亮点，再指出问题，再给修改建议
+- 文字清晰、简洁、有逻辑
+- 注意区分题目和答案，不要混淆`;
+
+            document.getElementById('newPlanPrompt').value = defaultPrompt;
+            showModal('createPlanModal');
+        }
+
+        async function createPlan() {
+            const name = document.getElementById('newPlanName').value.trim();
+            const description = document.getElementById('newPlanDescription').value.trim();
+            const prompt = document.getElementById('newPlanPrompt').value.trim();
+
+            if (!name || !description || !prompt) {
+                showAlert('请填写完整信息', '提示');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/plans`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ plan_name: name, description: description, prompt: prompt })
+                });
+
+                if (response.ok) {
+                    showAlert('创建成功！', '成功');
+                    closeModal('createPlanModal');
+                    await loadPlans();
+
+                    // 自动选择新创建的计划
+                    selectPlan(name);
+                } else {
+                    const error = await response.json();
+                    showAlert('创建失败: ' + error.detail, '错误');
+                }
+            } catch (error) {
+                console.error('创建计划失败:', error);
+                showAlert('创建失败', '错误');
+            }
+        }
+
+        // 编辑 Prompt
+        function showEditPromptModal() {
+            if (!currentPlan) {
+                showAlert('请先选择一个批改计划', '提示');
+                return;
+            }
+            document.getElementById('editPromptText').value = currentPlan.prompt;
+            showModal('editPromptModal');
+        }
+
+        async function updatePrompt() {
+            const prompt = document.getElementById('editPromptText').value.trim();
+
+            if (!prompt) {
+                showAlert('Prompt 不能为空', '提示');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(currentPlan.plan_name)}/prompt`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: prompt })
+                });
+
+                if (response.ok) {
+                    showAlert('更新成功！', '成功');
+                    closeModal('editPromptModal');
+                    selectPlan(currentPlan.plan_name);
+                } else {
+                    showAlert('更新失败', '错误');
+                }
+            } catch (error) {
+                console.error('更新 Prompt 失败:', error);
+                showAlert('更新失败', '错误');
+            }
+        }
+
+        // 批量重新批改
+        async function batchRegrade() {
+            if (!currentPlan) {
+                showAlert('请先选择一个批改计划', '提示');
+                return;
+            }
+
+            showConfirm('确定要重新批改所有记录吗？', async (confirmed) => {
+                if (!confirmed) return;
+
+                try {
+                    const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(currentPlan.plan_name)}/regrade`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({})
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        showAlert(data.message, '成功');
+                        loadRecords();
+                    } else {
+                        showAlert('批量重新批改失败', '错误');
+                    }
+                } catch (error) {
+                    console.error('批量重新批改失败:', error);
+                    showAlert('操作失败', '错误');
+                }
+            });
+        }
+
+        // 自动刷新（1秒）
+        function startAutoRefresh() {
+            stopAutoRefresh();
+            autoRefreshInterval = setInterval(() => {
+                if (currentPlan) {
+                    loadRecords();
+                }
+            }, 1000); // 1秒刷新一次
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+
+        function refreshRecords() {
+            loadRecords();
+        }
+
+        // 工具函数
+        function getStatusText(status) {
+            const statusMap = {
+                'pending': '等待批改',
+                'processing': '批改中',
+                'done': '已完成',
+                'failed': '失败'
+            };
+            return statusMap[status] || status;
+        }
+
+        function showModal(modalId) {
+            document.getElementById(modalId).classList.add('active');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('active');
+        }
+
+        // 点击模态框外部关闭
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    this.classList.remove('active');
+                }
+            });
+        });
+
+        // ==================== 二维码弹出框定位 ====================
+
+        function showQRCodePopup(event, planName) {
+            const popup = document.getElementById(`qrcode-popup-${planName}`);
+            if (!popup) return;
+
+            const container = event.currentTarget;
+            const rect = container.getBoundingClientRect();
+
+            // 计算位置：显示在右侧
+            const left = rect.right + 10;
+            const top = rect.top;
+
+            // 设置位置并显示
+            popup.style.left = left + 'px';
+            popup.style.top = top + 'px';
+            popup.style.display = 'block';
+        }
+
+        function hideQRCodePopup() {
+            const popups = document.querySelectorAll('.qrcode-popup');
+            popups.forEach(popup => {
+                popup.style.display = 'none';
+            });
+        }
+
+        // ==================== 自定义对话框功能 ====================
+
+        // 自定义提示框
+        function showAlert(message, title = '提示') {
+            document.getElementById('customAlertTitle').textContent = title;
+            document.getElementById('customAlertMessage').textContent = message;
+            document.getElementById('customAlertModal').classList.add('active');
+        }
+
+        function closeCustomAlert() {
+            document.getElementById('customAlertModal').classList.remove('active');
+        }
+
+        // 自定义确认框
+        let confirmCallback = null;
+
+        function showConfirm(message, callback, title = '确认') {
+            document.getElementById('customConfirmTitle').textContent = title;
+            document.getElementById('customConfirmMessage').textContent = message;
+            confirmCallback = callback;
+            document.getElementById('customConfirmModal').classList.add('active');
+        }
+
+        function confirmCustomConfirm() {
+            document.getElementById('customConfirmModal').classList.remove('active');
+            if (confirmCallback) {
+                confirmCallback(true);
+                confirmCallback = null;
+            }
+        }
+
+        function cancelCustomConfirm() {
+            document.getElementById('customConfirmModal').classList.remove('active');
+            if (confirmCallback) {
+                confirmCallback(false);
+                confirmCallback = null;
+            }
+        }
+
+        // ==================== 图片浏览器功能 ====================
+
+        // 打开图片浏览器
+        function openImageViewer(images, index) {
+            currentImages = images;
+            currentImageIndex = index;
+            updateImageViewer();
+            document.getElementById('imageViewerModal').classList.add('active');
+        }
+
+        // 关闭图片浏览器
+        function closeImageViewer() {
+            document.getElementById('imageViewerModal').classList.remove('active');
+            currentImages = [];
+            currentImageIndex = 0;
+        }
+
+        // 上一张图片
+        function prevImage() {
+            if (currentImageIndex > 0) {
+                currentImageIndex--;
+                updateImageViewer();
+            }
+        }
+
+        // 下一张图片
+        function nextImage() {
+            if (currentImageIndex < currentImages.length - 1) {
+                currentImageIndex++;
+                updateImageViewer();
+            }
+        }
+
+        // 更新图片浏览器显示
+        function updateImageViewer() {
+            const img = document.getElementById('imageViewerImg');
+            const counter = document.getElementById('imageViewerCounter');
+            const prevBtn = document.querySelector('.image-viewer-prev');
+            const nextBtn = document.querySelector('.image-viewer-next');
+
+            // 更新图片
+            img.src = currentImages[currentImageIndex];
+
+            // 更新计数器
+            counter.textContent = `${currentImageIndex + 1} / ${currentImages.length}`;
+
+            // 更新按钮状态
+            prevBtn.disabled = currentImageIndex === 0;
+            nextBtn.disabled = currentImageIndex === currentImages.length - 1;
+        }
+
+        // 键盘事件处理
+        function handleKeyPress(e) {
+            const modal = document.getElementById('imageViewerModal');
+            if (!modal.classList.contains('active')) return;
+
+            switch(e.key) {
+                case 'ArrowLeft':
+                    prevImage();
+                    break;
+                case 'ArrowRight':
+                    nextImage();
+                    break;
+                case 'Escape':
+                    closeImageViewer();
+                    break;
+            }
+        }
+    </script>
+</body>
+</html>

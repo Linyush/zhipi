@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>智批 - 提交作业</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            overflow: hidden;
+            padding: 10px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            padding: 10px 0;
+            flex-shrink: 0;
+        }
+
+        .header h1 {
+            font-size: 22px;
+            margin-bottom: 5px;
+        }
+
+        .plan-name {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 6px 15px;
+            border-radius: 15px;
+            display: inline-block;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .plan-name:active {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(0.98);
+        }
+
+        .plan-name::after {
+            content: ' ▼';
+            font-size: 10px;
+            opacity: 0.7;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 15px;
+            flex: 1;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: bold;
+            color: #333;
+            font-size: 15px;
+        }
+
+        .form-group input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+
+        .form-group input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .upload-area {
+            border: 2px dashed #d0d0d0;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            background: #fafafa;
+            transition: all 0.3s;
+        }
+
+        .upload-area.hidden {
+            display: none;
+        }
+
+        .upload-area:active {
+            background: #e8f0fe;
+        }
+
+        .upload-icon {
+            font-size: 36px;
+            margin-bottom: 5px;
+        }
+
+        .upload-text {
+            color: #666;
+            font-size: 13px;
+        }
+
+        .upload-add-btn {
+            border: 2px dashed #d0d0d0;
+            border-radius: 8px;
+            background: #fafafa;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            aspect-ratio: 1;
+            font-size: 32px;
+            color: #999;
+            transition: all 0.2s;
+        }
+
+        .upload-add-btn:active {
+            background: #e8f0fe;
+            transform: scale(0.95);
+        }
+
+        #imageInput {
+            display: none;
+        }
+
+        .preview-area {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .preview-item {
+            position: relative;
+            border-radius: 8px;
+            overflow: hidden;
+            aspect-ratio: 1;
+            border: 2px solid #e0e0e0;
+            cursor: move;
+            user-select: none;
+            -webkit-user-select: none;
+            transition: transform 0.2s, opacity 0.2s, border-color 0.2s;
+        }
+
+        .preview-item.dragging {
+            opacity: 0.6;
+            transform: scale(1.05);
+            z-index: 1000;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .preview-item.drag-over {
+            border-color: #667eea;
+            border-width: 3px;
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .preview-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .preview-item .order-badge {
+            position: absolute;
+            top: 5px;
+            left: 5px;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .preview-item .remove-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+            line-height: 1;
+            transition: background 0.2s;
+        }
+
+        .preview-item .remove-btn:active {
+            background: rgba(0, 0, 0, 0.7);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin-top: 15px;
+        }
+
+        .submit-btn:active {
+            opacity: 0.9;
+        }
+
+        .submit-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .alert {
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            display: none;
+            font-size: 14px;
+        }
+
+        .alert.show {
+            display: block;
+        }
+
+        .alert-success {
+            background: #d1f2eb;
+            color: #0f5132;
+            border-left: 4px solid #198754;
+        }
+
+        .alert-error {
+            background: #f8d7da;
+            color: #842029;
+            border-left: 4px solid #dc3545;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 15px;
+            color: white;
+            font-size: 14px;
+            display: none;
+        }
+
+        .loading.show {
+            display: block;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .info-box {
+            background: #e8f4f8;
+            border-left: 3px solid #0dcaf0;
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 12px;
+            font-size: 12px;
+            color: #055160;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 9999;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            max-width: 400px;
+            width: 100%;
+            max-height: 70vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: #999;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .plan-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .plan-item {
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: white;
+        }
+
+        .plan-item:active {
+            background: #f0f0f0;
+            transform: scale(0.98);
+        }
+
+        .plan-item.current {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .plan-item-name {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .plan-item-info {
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📚 智批</h1>
+            <div class="plan-name" id="planNameDisplay" onclick="showPlanSelector()">加载中...</div>
+        </div>
+
+        <div id="loadingMessage" class="loading">
+            <div class="loading-spinner"></div>
+            <span>正在提交...</span>
+        </div>
+
+        <div class="card">
+            <div id="alertBox" class="alert"></div>
+
+            <div class="info-box">
+                📸 按页码顺序拍照，长按拖动调整顺序
+            </div>
+
+            <form id="uploadForm">
+                <div class="form-group">
+                    <label>👤 学生姓名</label>
+                    <input type="text" id="studentName" placeholder="请输入学生姓名" required>
+                </div>
+
+                <div class="form-group">
+                    <label>📷 作业照片（最多9张）</label>
+                    <div class="upload-area" id="uploadArea" onclick="document.getElementById('imageInput').click()">
+                        <div class="upload-icon">📸</div>
+                        <div class="upload-text">点击拍照或选择照片</div>
+                    </div>
+                    <input type="file" id="imageInput" accept="image/*" multiple capture="environment">
+                    <div id="previewArea" class="preview-area"></div>
+                </div>
+
+                <button type="submit" class="submit-btn" id="submitBtn">提交作业</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 计划选择器弹窗 -->
+    <div id="planModal" class="modal" onclick="if(event.target === this) hidePlanSelector()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">选择批改计划</div>
+                <button class="modal-close" onclick="hidePlanSelector()">×</button>
+            </div>
+            <div id="planList" class="plan-list">
+                <div style="text-align: center; padding: 20px; color: #999;">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+        let selectedFiles = [];
+        let planName = '';
+
+        // 初始化
+        window.onload = function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            planName = urlParams.get('plan');
+
+            if (!planName) {
+                showAlert('错误：未指定批改计划', 'error');
+                return;
+            }
+
+            document.getElementById('planNameDisplay').textContent = planName;
+            verifyPlan();
+        };
+
+        // 验证批改计划是否存在
+        async function verifyPlan() {
+            try {
+                const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(planName)}`);
+                if (!response.ok) {
+                    showAlert('批改计划不存在', 'error');
+                }
+            } catch (error) {
+                console.error('验证计划失败:', error);
+                showAlert('连接服务器失败', 'error');
+            }
+        }
+
+        // 处理文件选择 - 保持选择顺序
+        document.getElementById('imageInput').addEventListener('change', function(e) {
+            const files = Array.from(e.target.files);
+
+            if (files.length === 0) return;
+
+            // 检查文件数量
+            if (selectedFiles.length + files.length > 9) {
+                showAlert('最多只能上传 9 张图片', 'error');
+                return;
+            }
+
+            let duplicateCount = 0;
+            let addedCount = 0;
+
+            // 按照选择顺序添加文件
+            files.forEach(file => {
+                // 验证文件类型
+                if (!file.type.startsWith('image/')) {
+                    showAlert(`${file.name} 不是图片文件`, 'error');
+                    return;
+                }
+
+                // 验证文件大小
+                if (file.size > 10 * 1024 * 1024) {
+                    showAlert(`${file.name} 超过 10MB`, 'error');
+                    return;
+                }
+
+                // 检查是否已经选择过该文件
+                const isDuplicate = selectedFiles.some(existingFile =>
+                    existingFile.name === file.name &&
+                    existingFile.size === file.size &&
+                    existingFile.lastModified === file.lastModified
+                );
+
+                if (isDuplicate) {
+                    duplicateCount++;
+                    return;
+                }
+
+                // 添加到数组末尾，保持选择顺序
+                selectedFiles.push(file);
+                addedCount++;
+            });
+
+            // 提示重复文件
+            if (duplicateCount > 0) {
+                showAlert(`已过滤 ${duplicateCount} 张重复图片`, 'error');
+            }
+
+            // 只有添加了新文件才更新预览
+            if (addedCount > 0) {
+                updatePreviews();
+            }
+
+            // 清空 input
+            e.target.value = '';
+        });
+
+        // 更新预览
+        function updatePreviews() {
+            const previewArea = document.getElementById('previewArea');
+            const uploadArea = document.getElementById('uploadArea');
+            previewArea.innerHTML = '';
+
+            // 如果没有图片，显示完整上传区域
+            if (selectedFiles.length === 0) {
+                uploadArea.classList.remove('hidden');
+                return;
+            }
+
+            // 有图片时，隐藏完整上传区域
+            uploadArea.classList.add('hidden');
+
+            // 先创建所有预览容器（保持顺序）
+            selectedFiles.forEach((file, index) => {
+                const previewItem = document.createElement('div');
+                previewItem.className = 'preview-item';
+                previewItem.draggable = true;
+                previewItem.dataset.index = index;
+
+                // 创建图片元素
+                const img = document.createElement('img');
+                img.alt = '预览';
+                img.style.width = '100%';
+                img.style.height = '100%';
+                img.style.objectFit = 'cover';
+                img.style.background = '#f5f5f5'; // 加载时的背景色
+                img.style.pointerEvents = 'none'; // 防止图片干扰拖拽
+
+                // 创建序号标记
+                const badge = document.createElement('div');
+                badge.className = 'order-badge';
+                badge.textContent = index + 1;
+                badge.style.pointerEvents = 'none'; // 防止标记干扰拖拽
+
+                // 创建删除按钮
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'remove-btn';
+                removeBtn.textContent = '×';
+                removeBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    removeImage(index);
+                };
+
+                // 组装元素
+                previewItem.appendChild(img);
+                previewItem.appendChild(badge);
+                previewItem.appendChild(removeBtn);
+
+                // 添加触摸事件监听器（移动端）
+                previewItem.addEventListener('touchstart', handleTouchStart, {passive: false});
+                previewItem.addEventListener('touchmove', handleTouchMove, {passive: false});
+                previewItem.addEventListener('touchend', handleTouchEnd, {passive: false});
+
+                // 立即添加到 DOM（保持顺序）
+                previewArea.appendChild(previewItem);
+
+                // 异步加载图片
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+
+            // 如果还没有达到9张，添加"添加"按钮
+            if (selectedFiles.length < 9) {
+                const addBtn = document.createElement('div');
+                addBtn.className = 'upload-add-btn';
+                addBtn.innerHTML = '+';
+                addBtn.onclick = () => document.getElementById('imageInput').click();
+                previewArea.appendChild(addBtn);
+            }
+        }
+
+        // 移除图片
+        function removeImage(index) {
+            selectedFiles.splice(index, 1);
+            updatePreviews();
+        }
+
+        // 触摸拖拽相关变量
+        let touchDragSrcEl = null;
+        let touchDragSrcIndex = null;
+
+        // 触摸开始
+        function handleTouchStart(e) {
+            // 如果点击的是删除按钮，不处理拖拽
+            if (e.target.classList.contains('remove-btn')) {
+                return;
+            }
+
+            touchDragSrcEl = this;
+            touchDragSrcIndex = parseInt(this.dataset.index);
+
+            this.classList.add('dragging');
+
+            // 阻止默认行为和滚动
+            e.preventDefault();
+        }
+
+        // 触摸移动
+        function handleTouchMove(e) {
+            if (!touchDragSrcEl) return;
+
+            e.preventDefault();
+
+            const touch = e.touches[0];
+            const element = document.elementFromPoint(touch.clientX, touch.clientY);
+
+            // 清除所有 drag-over 状态
+            document.querySelectorAll('.preview-item').forEach(item => {
+                item.classList.remove('drag-over');
+            });
+
+            // 找到触摸点下的预览项
+            let targetItem = element;
+            while (targetItem && !targetItem.classList.contains('preview-item')) {
+                targetItem = targetItem.parentElement;
+            }
+
+            // 如果触摸到其他预览项，添加高亮
+            if (targetItem && targetItem.classList.contains('preview-item') && targetItem !== touchDragSrcEl) {
+                targetItem.classList.add('drag-over');
+            }
+        }
+
+        // 触摸结束
+        function handleTouchEnd(e) {
+            if (!touchDragSrcEl) return;
+
+            e.preventDefault();
+
+            const touch = e.changedTouches[0];
+            const element = document.elementFromPoint(touch.clientX, touch.clientY);
+
+            // 找到目标预览项
+            let targetItem = element;
+            while (targetItem && !targetItem.classList.contains('preview-item')) {
+                targetItem = targetItem.parentElement;
+            }
+
+            // 如果拖到了其他预览项，交换位置
+            if (targetItem && targetItem.classList.contains('preview-item') && targetItem !== touchDragSrcEl) {
+                const targetIndex = parseInt(targetItem.dataset.index);
+
+                // 交换数组中的元素
+                const draggedFile = selectedFiles[touchDragSrcIndex];
+                selectedFiles.splice(touchDragSrcIndex, 1);
+                selectedFiles.splice(targetIndex, 0, draggedFile);
+
+                // 更新预览
+                updatePreviews();
+            }
+
+            // 清理状态
+            document.querySelectorAll('.preview-item').forEach(item => {
+                item.classList.remove('dragging', 'drag-over');
+            });
+
+            touchDragSrcEl = null;
+            touchDragSrcIndex = null;
+        }
+
+        // 计划选择器相关
+        let allPlans = [];
+
+        // 显示计划选择器
+        async function showPlanSelector() {
+            const modal = document.getElementById('planModal');
+            const planList = document.getElementById('planList');
+
+            modal.classList.add('show');
+            planList.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">加载中...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/plans`);
+                if (!response.ok) {
+                    throw new Error('获取计划列表失败');
+                }
+
+                const data = await response.json();
+                allPlans = data.plans || [];
+
+                if (allPlans.length === 0) {
+                    planList.innerHTML = '<div style="text-align: center; padding: 20px; color: #999;">暂无批改计划</div>';
+                    return;
+                }
+
+                // 渲染计划列表
+                planList.innerHTML = allPlans.map(plan => `
+                    <div class="plan-item ${plan.plan_name === planName ? 'current' : ''}" onclick="selectPlan('${plan.plan_name}')">
+                        <div class="plan-item-name">${plan.plan_name}</div>
+                        <div class="plan-item-info">
+                            📊 ${plan.record_count || 0} 份作业
+                            ${plan.description ? ` · ${plan.description.substring(0, 15)}${plan.description.length > 15 ? '...' : ''}` : ''}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('加载计划列表失败:', error);
+                planList.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc3545;">加载失败，请重试</div>';
+            }
+        }
+
+        // 隐藏计划选择器
+        function hidePlanSelector() {
+            document.getElementById('planModal').classList.remove('show');
+        }
+
+        // 选择计划
+        function selectPlan(newPlanName) {
+            if (newPlanName === planName) {
+                hidePlanSelector();
+                return;
+            }
+
+            // 更新全局计划名
+            planName = newPlanName;
+
+            // 更新显示
+            document.getElementById('planNameDisplay').textContent = planName;
+
+            // 更新 URL（不重新加载页面）
+            const url = new URL(window.location.href);
+            url.searchParams.set('plan', newPlanName);
+            history.pushState({plan: newPlanName}, '', url.toString());
+
+            // 关闭弹窗
+            hidePlanSelector();
+
+            // 验证新计划
+            verifyPlan();
+        }
+
+        // 提交表单
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const studentName = document.getElementById('studentName').value.trim();
+
+            if (!studentName) {
+                showAlert('请输入学生姓名', 'error');
+                return;
+            }
+
+            if (selectedFiles.length === 0) {
+                showAlert('请至少选择一张照片', 'error');
+                return;
+            }
+
+            // 显示加载状态
+            document.getElementById('loadingMessage').classList.add('show');
+            document.getElementById('submitBtn').disabled = true;
+
+            // 构建表单数据 - 按照 selectedFiles 的顺序上传
+            const formData = new FormData();
+            formData.append('student', studentName);
+
+            // 重要：按照数组顺序添加文件，确保顺序正确
+            selectedFiles.forEach((file, index) => {
+                formData.append('images', file);
+            });
+
+            try {
+                const response = await fetch(`${API_BASE}/upload/${encodeURIComponent(planName)}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    showAlert('✅ 提交成功！作业正在批改中...', 'success');
+
+                    // 清空表单
+                    document.getElementById('studentName').value = '';
+                    selectedFiles = [];
+                    updatePreviews(); // 重新渲染，会显示上传区域
+
+                    // 3秒后隐藏成功提示
+                    setTimeout(() => {
+                        hideAlert();
+                    }, 3000);
+                } else {
+                    const error = await response.json();
+                    showAlert('提交失败: ' + (error.detail || '未知错误'), 'error');
+                }
+            } catch (error) {
+                console.error('提交失败:', error);
+                showAlert('网络错误，请检查连接', 'error');
+            } finally {
+                document.getElementById('loadingMessage').classList.remove('show');
+                document.getElementById('submitBtn').disabled = false;
+            }
+        });
+
+        // 显示提示
+        function showAlert(message, type) {
+            const alertBox = document.getElementById('alertBox');
+            alertBox.className = `alert alert-${type} show`;
+            alertBox.textContent = message;
+        }
+
+        // 隐藏提示
+        function hideAlert() {
+            const alertBox = document.getElementById('alertBox');
+            alertBox.classList.remove('show');
+        }
+    </script>
+</body>
+</html>
