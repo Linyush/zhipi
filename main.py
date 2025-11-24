@@ -52,6 +52,7 @@ class Config:
     # 服务器配置
     SERVER_PORT = int(os.getenv("SERVER_PORT", "8000"))
     DATA_DIR = Path(os.getenv("DATA_DIR", "./data"))
+    BASE_URL = os.getenv("BASE_URL", "")  # 外部访问地址，如 http://zptest.dev.glijjy.com
 
     # 文件上传限制
     MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -433,12 +434,16 @@ async def generate_qrcode(plan_name: str):
     if not config_path.exists():
         raise HTTPException(status_code=404, detail=f"批改计划 '{plan_name}' 不存在")
 
-    # 获取本机 IP
-    ip = get_local_ip()
-
     # 生成二维码内容（手机端 URL）
     from urllib.parse import quote
-    url = f"http://{ip}:{Config.SERVER_PORT}/static/mobile.html?plan={quote(plan_name)}"
+    if Config.BASE_URL:
+        # 使用配置的外部访问地址
+        base = Config.BASE_URL.rstrip('/')
+        url = f"{base}/static/mobile.html?plan={quote(plan_name)}"
+    else:
+        # 回退到局域网 IP
+        ip = get_local_ip()
+        url = f"http://{ip}:{Config.SERVER_PORT}/static/mobile.html?plan={quote(plan_name)}"
 
     # 生成二维码
     qr = qrcode.QRCode(
