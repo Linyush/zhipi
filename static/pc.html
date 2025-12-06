@@ -262,6 +262,29 @@
         .status-done { background: #d1e7dd; color: #0f5132; }
         .status-failed { background: #f8d7da; color: #842029; }
 
+        /* 批量操作工具栏 */
+        .batch-actions-toolbar {
+            padding: 10px 15px;
+            background: #f5f5f5;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .batch-actions-toolbar input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+
+        .record-checkbox {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            margin: 0;
+        }
+
         /* 记录详情（展开内容） */
         .record-detail {
             display: none;
@@ -702,40 +725,42 @@
         </div>
     </div>
 
-    <!-- 创建计划模态框 -->
+    <!-- 创建/编辑计划模态框 -->
     <div id="createPlanModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">创建批改计划</div>
-            <div class="form-group">
-                <label>计划名称:</label>
-                <input type="text" id="newPlanName" placeholder="例如：语文作业第一单元">
-            </div>
-            <div class="form-group">
-                <label>计划描述:</label>
-                <input type="text" id="newPlanDescription" placeholder="简短描述这个批改计划（30字以内）">
-            </div>
-            <div class="form-group">
-                <label>批改要求:</label>
-                <textarea id="newPlanPrompt" placeholder="请输入批改要求...&#10;&#10;例如：&#10;你是一名耐心且专业的小学四年级语文老师。请仔细查看学生提交的作业图片，并提供详细的批改意见。"></textarea>
-            </div>
-            <div class="modal-footer">
-                <button class="secondary" onclick="closeModal('createPlanModal')">取消</button>
-                <button onclick="createPlan()">创建</button>
-            </div>
-        </div>
-    </div>
+        <div class="modal-content" style="max-width: 1000px; height: 85vh; display: flex; flex-direction: column;">
+            <div class="modal-header" id="planModalTitle">创建批改计划</div>
+            <input type="hidden" id="planModalMode" value="create">
+            <input type="hidden" id="planModalOriginalName" value="">
 
-    <!-- 编辑 Prompt 模态框 -->
-    <div id="editPromptModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">编辑批改要求</div>
-            <div class="form-group">
-                <label>批改要求:</label>
-                <textarea id="editPromptText"></textarea>
+            <div style="display: flex; gap: 20px; flex: 1; min-height: 0; overflow: hidden;">
+                <!-- 左栏：基本信息 -->
+                <div style="width: 300px; display: flex; flex-direction: column; gap: 15px;">
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label>计划名称:</label>
+                        <input type="text" id="newPlanName" placeholder="例如：语文作业第一单元">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <label>计划描述:</label>
+                        <textarea id="newPlanDescription" placeholder="简短描述这个批改计划" style="min-height: 80px; resize: vertical;"></textarea>
+                    </div>
+                    <div style="padding: 12px; background: #f0f7ff; border-radius: 6px; font-size: 12px; color: #666;">
+                        <div style="margin-bottom: 6px; font-weight: bold; color: #333;">💡 提示</div>
+                        <div>• 计划名称不能重复</div>
+                        <div>• 描述建议30字以内</div>
+                        <div>• 批改要求越详细，AI 批改越准确</div>
+                    </div>
+                </div>
+
+                <!-- 右栏：批改要求 -->
+                <div class="form-group" style="flex: 1; margin-bottom: 0; display: flex; flex-direction: column; min-height: 0;">
+                    <label>批改要求:</label>
+                    <textarea id="newPlanPrompt" style="flex: 1; min-height: 0; font-size: 13px; resize: none;" placeholder="请输入批改要求...&#10;&#10;例如：&#10;你是一名耐心且专业的小学四年级语文老师。请仔细查看学生提交的作业图片，并提供详细的批改意见。"></textarea>
+                </div>
             </div>
-            <div class="modal-footer">
-                <button class="secondary" onclick="closeModal('editPromptModal')">取消</button>
-                <button onclick="updatePrompt()">保存</button>
+
+            <div class="modal-footer" style="margin-top: 15px;">
+                <button class="secondary" onclick="closeModal('createPlanModal')">取消</button>
+                <button id="planModalSubmitBtn" onclick="savePlan()">创建</button>
             </div>
         </div>
     </div>
@@ -899,8 +924,9 @@
                                 <div class="qrcode-popup-title">扫码上传作业</div>
                             </div>
                         </div>
-                        <a onclick="event.stopPropagation(); showEditPromptModal()">批改要求</a>
+                        <a onclick="event.stopPropagation(); showEditPlanModal()">编辑计划</a>
                         <a onclick="event.stopPropagation(); batchRegrade()">重新批改</a>
+                        <a onclick="event.stopPropagation(); deletePlan()" style="color: #f44336;">删除计划</a>
                     </div>
                 </div>
                 `;
@@ -1038,14 +1064,31 @@
                 return;
             }
 
-            container.innerHTML = records.map(record => `
+            // 添加批量操作工具栏
+            let html = `
+            <div class="batch-actions-toolbar">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll()" title="全选/取消全选">
+                    <span style="font-size: 13px; color: #666;">全选</span>
+                </div>
+                <div id="batchActions" style="display: none; gap: 8px; align-items: center;">
+                    <span style="font-size: 12px; color: #666;">已选择 <span id="selectedCount">0</span> 条</span>
+                    <button class="small danger" onclick="batchDeleteRecords()">🗑️ 批量删除</button>
+                </div>
+            </div>
+            `;
+
+            html += records.map(record => `
                 <div class="record-item ${currentExpandedRecordId === record.id ? 'active' : ''}" onclick="toggleRecord('${record.id}')">
                     <div class="record-header">
-                        <div>
-                            <div class="record-title">学生: ${record.student}</div>
-                            <div class="record-meta">
-                                ${new Date(record.created_at).toLocaleString('zh-CN')}
-                                ${record.regrade_count > 0 ? ` | 重批 ${record.regrade_count} 次` : ''}
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <input type="checkbox" class="record-checkbox" value="${record.id}" onclick="event.stopPropagation(); updateBatchActionButtons()">
+                            <div>
+                                <div class="record-title">学生: ${record.student}</div>
+                                <div class="record-meta">
+                                    ${new Date(record.created_at).toLocaleString('zh-CN')}
+                                    ${record.regrade_count > 0 ? ` | 重批 ${record.regrade_count} 次` : ''}
+                                </div>
                             </div>
                         </div>
                         <span class="record-status status-${record.status}">${getStatusText(record.status)}</span>
@@ -1054,6 +1097,8 @@
                 </div>
             `).join('');
 
+            container.innerHTML = html;
+
             // 如果有展开的记录，重新加载其详情
             if (currentExpandedRecordId) {
                 const detailDiv = document.getElementById(`detail-${currentExpandedRecordId}`);
@@ -1061,6 +1106,9 @@
                     reloadRecordDetail(currentExpandedRecordId);
                 }
             }
+
+            // 更新批量操作按钮状态
+            updateBatchActionButtons();
         }
 
         // 生成详情 HTML（提取为函数以便复用）
@@ -1248,8 +1296,123 @@
             });
         }
 
-        // 创建计划
+        // 批量删除记录
+        async function batchDeleteRecords() {
+            const checkboxes = document.querySelectorAll('.record-checkbox:checked');
+            if (checkboxes.length === 0) {
+                showAlert('请先选择要删除的记录');
+                return;
+            }
+
+            const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+            showConfirm(`确定要删除选中的 ${selectedIds.length} 条记录吗？删除后无法恢复！`, async (confirmed) => {
+                if (!confirmed) return;
+
+                try {
+                    const response = await fetch(`${API_BASE}/records/${encodeURIComponent(currentPlan.plan_name)}/batch-delete`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ record_ids: selectedIds })
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        showAlert(`成功删除 ${result.deleted_count} 条记录`);
+                        currentExpandedRecordId = null;
+                        loadRecords();
+                    } else {
+                        const error = await response.json();
+                        showAlert('批量删除失败: ' + (error.detail || '未知错误'), '错误');
+                    }
+                } catch (error) {
+                    console.error('批量删除失败:', error);
+                    showAlert('批量删除失败', '错误');
+                }
+            });
+        }
+
+        // 删除批改计划
+        async function deletePlan() {
+            if (!currentPlan) {
+                showAlert('请先选择一个批改计划');
+                return;
+            }
+
+            showConfirm(`确定要删除计划"${currentPlan.plan_name}"吗？\n\n这将删除计划下的所有记录和图片，且无法恢复！`, async (confirmed) => {
+                if (!confirmed) return;
+
+                try {
+                    const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(currentPlan.plan_name)}`, {
+                        method: 'DELETE'
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+                        showAlert(`计划已删除（${result.deleted.records_count} 条记录，${result.deleted.images_count} 张图片）`);
+
+                        // 清空当前选择
+                        currentPlan = null;
+                        currentExpandedRecordId = null;
+
+                        // 隐藏右侧区域
+                        document.getElementById('recordsArea').classList.remove('active');
+                        document.getElementById('emptyPlaceholder').style.display = 'flex';
+
+                        // 停止自动刷新
+                        stopAutoRefresh();
+
+                        // 重新加载计划列表
+                        loadPlans();
+
+                        // 清除保存的状态
+                        localStorage.removeItem('currentPlanName');
+                    } else {
+                        const error = await response.json();
+                        showAlert('删除计划失败: ' + (error.detail || '未知错误'), '错误');
+                    }
+                } catch (error) {
+                    console.error('删除计划失败:', error);
+                    showAlert('删除计划失败', '错误');
+                }
+            });
+        }
+
+        // 全选/取消全选记录
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            const checkboxes = document.querySelectorAll('.record-checkbox');
+            checkboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+            updateBatchActionButtons();
+        }
+
+        // 更新批量操作按钮状态
+        function updateBatchActionButtons() {
+            const checkedCount = document.querySelectorAll('.record-checkbox:checked').length;
+            const batchActions = document.getElementById('batchActions');
+            const selectedCount = document.getElementById('selectedCount');
+
+            if (batchActions) {
+                batchActions.style.display = checkedCount > 0 ? 'flex' : 'none';
+            }
+            if (selectedCount) {
+                selectedCount.textContent = checkedCount;
+            }
+
+            // 更新全选框状态
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            const allCheckboxes = document.querySelectorAll('.record-checkbox');
+            if (selectAllCheckbox && allCheckboxes.length > 0) {
+                selectAllCheckbox.checked = checkedCount === allCheckboxes.length;
+                selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < allCheckboxes.length;
+            }
+        }
+
+        // 显示创建计划模态框
         function showCreatePlanModal() {
+            document.getElementById('planModalMode').value = 'create';
+            document.getElementById('planModalOriginalName').value = '';
+            document.getElementById('planModalTitle').textContent = '创建批改计划';
+            document.getElementById('planModalSubmitBtn').textContent = '创建';
             document.getElementById('newPlanName').value = '';
             document.getElementById('newPlanDescription').value = '';
 
@@ -1312,7 +1475,27 @@
             showModal('createPlanModal');
         }
 
-        async function createPlan() {
+        // 显示编辑计划模态框
+        function showEditPlanModal() {
+            if (!currentPlan) {
+                showAlert('请先选择一个批改计划', '提示');
+                return;
+            }
+
+            document.getElementById('planModalMode').value = 'edit';
+            document.getElementById('planModalOriginalName').value = currentPlan.plan_name;
+            document.getElementById('planModalTitle').textContent = '编辑批改计划';
+            document.getElementById('planModalSubmitBtn').textContent = '保存';
+            document.getElementById('newPlanName').value = currentPlan.plan_name;
+            document.getElementById('newPlanDescription').value = currentPlan.description;
+            document.getElementById('newPlanPrompt').value = currentPlan.prompt;
+
+            showModal('createPlanModal');
+        }
+
+        // 保存计划（创建或编辑）
+        async function savePlan() {
+            const mode = document.getElementById('planModalMode').value;
             const name = document.getElementById('newPlanName').value.trim();
             const description = document.getElementById('newPlanDescription').value.trim();
             const prompt = document.getElementById('newPlanPrompt').value.trim();
@@ -1322,65 +1505,65 @@
                 return;
             }
 
-            try {
-                const response = await fetch(`${API_BASE}/plans`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ plan_name: name, description: description, prompt: prompt })
-                });
+            if (mode === 'create') {
+                // 创建模式
+                try {
+                    const response = await fetch(`${API_BASE}/plans`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ plan_name: name, description: description, prompt: prompt })
+                    });
 
-                if (response.ok) {
-                    showAlert('创建成功！', '成功');
-                    closeModal('createPlanModal');
-                    await loadPlans();
+                    if (response.ok) {
+                        showAlert('创建成功！', '成功');
+                        closeModal('createPlanModal');
+                        await loadPlans();
 
-                    // 自动选择新创建的计划
-                    selectPlan(name);
-                } else {
-                    const error = await response.json();
-                    showAlert('创建失败: ' + error.detail, '错误');
+                        // 自动选择新创建的计划
+                        selectPlan(name);
+                    } else {
+                        const error = await response.json();
+                        showAlert('创建失败: ' + error.detail, '错误');
+                    }
+                } catch (error) {
+                    console.error('创建计划失败:', error);
+                    showAlert('创建失败', '错误');
                 }
-            } catch (error) {
-                console.error('创建计划失败:', error);
-                showAlert('创建失败', '错误');
-            }
-        }
+            } else {
+                // 编辑模式
+                const originalName = document.getElementById('planModalOriginalName').value;
 
-        // 编辑 Prompt
-        function showEditPromptModal() {
-            if (!currentPlan) {
-                showAlert('请先选择一个批改计划', '提示');
-                return;
-            }
-            document.getElementById('editPromptText').value = currentPlan.prompt;
-            showModal('editPromptModal');
-        }
+                try {
+                    const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(originalName)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            plan_name: name !== originalName ? name : undefined,
+                            description: description,
+                            prompt: prompt
+                        })
+                    });
 
-        async function updatePrompt() {
-            const prompt = document.getElementById('editPromptText').value.trim();
+                    if (response.ok) {
+                        const result = await response.json();
+                        showAlert('更新成功！', '成功');
+                        closeModal('createPlanModal');
+                        await loadPlans();
 
-            if (!prompt) {
-                showAlert('Prompt 不能为空', '提示');
-                return;
-            }
-
-            try {
-                const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(currentPlan.plan_name)}/prompt`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: prompt })
-                });
-
-                if (response.ok) {
-                    showAlert('更新成功！', '成功');
-                    closeModal('editPromptModal');
-                    selectPlan(currentPlan.plan_name);
-                } else {
+                        // 如果重命名了，选择新名称；否则刷新当前计划
+                        if (result.renamed) {
+                            selectPlan(result.new_name);
+                        } else {
+                            selectPlan(name);
+                        }
+                    } else {
+                        const error = await response.json();
+                        showAlert('更新失败: ' + error.detail, '错误');
+                    }
+                } catch (error) {
+                    console.error('更新计划失败:', error);
                     showAlert('更新失败', '错误');
                 }
-            } catch (error) {
-                console.error('更新 Prompt 失败:', error);
-                showAlert('更新失败', '错误');
             }
         }
 

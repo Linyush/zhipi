@@ -166,8 +166,16 @@ class PlanCreate(BaseModel):
 class PromptUpdate(BaseModel):
     prompt: str
 
+class PlanUpdate(BaseModel):
+    plan_name: Optional[str] = None
+    description: Optional[str] = None
+    prompt: Optional[str] = None
+
 class RegradeRequest(BaseModel):
     record_ids: Optional[List[str]] = None
+
+class DeleteRecordsRequest(BaseModel):
+    record_ids: List[str]
 
 
 # ==================== FastAPI 应用 ====================
@@ -402,9 +410,72 @@ async def get_plan(plan_name: str):
         raise HTTPException(status_code=500, detail=f"读取配置失败: {str(e)}")
 
 
+@app.put("/plans/{plan_name}")
+async def update_plan(plan_name: str, update: PlanUpdate):
+    """更新批改计划信息（名称、描述、批改要求）"""
+    config_path = PathHelper.get_config_path(plan_name)
+
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail=f"批改计划 '{plan_name}' 不存在")
+
+    try:
+        config = load_json(config_path)
+        old_plan_name = plan_name
+        new_plan_name = plan_name
+
+        # 更新描述
+        if update.description is not None:
+            config["description"] = update.description
+
+        # 更新 prompt
+        if update.prompt is not None:
+            config["prompt"] = update.prompt
+
+        # 更新计划名称（需要重命名目录）
+        if update.plan_name is not None and update.plan_name != plan_name:
+            new_plan_name = update.plan_name
+            config["plan_name"] = new_plan_name
+
+            # 重命名目录
+            old_plan_dir = PathHelper.get_plan_dir(old_plan_name)
+            new_plan_dir = PathHelper.get_plan_dir(new_plan_name)
+
+            if new_plan_dir.exists():
+                raise HTTPException(status_code=400, detail=f"计划名称 '{new_plan_name}' 已存在")
+
+            # 先保存到旧路径
+            config["updated_at"] = datetime.now().isoformat()
+            save_json(config_path, config)
+
+            # 重命名目录
+            old_plan_dir.rename(new_plan_dir)
+
+            return {
+                "message": "计划信息更新成功",
+                "plan": config,
+                "renamed": True,
+                "old_name": old_plan_name,
+                "new_name": new_plan_name
+            }
+        else:
+            # 只更新配置，不重命名
+            config["updated_at"] = datetime.now().isoformat()
+            save_json(config_path, config)
+
+            return {
+                "message": "计划信息更新成功",
+                "plan": config,
+                "renamed": False
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"更新失败: {str(e)}")
+
+
 @app.put("/plans/{plan_name}/prompt")
 async def update_prompt(plan_name: str, update: PromptUpdate):
-    """更新批改计划的 prompt"""
+    """更新批改计划的 prompt（已弃用，请使用 PUT /plans/{plan_name}）"""
     config_path = PathHelper.get_config_path(plan_name)
 
     if not config_path.exists():
@@ -464,6 +535,38 @@ async def generate_qrcode(plan_name: str):
     img_buffer.seek(0)
 
     return StreamingResponse(img_buffer, media_type="image/png")
+
+
+@app.delete("/plans/{plan_name}")
+async def delete_plan(plan_name: str):
+    """删除批改计划及其所有记录"""
+    plan_dir = PathHelper.get_plan_dir(plan_name)
+
+    if not plan_dir.exists():
+        raise HTTPException(status_code=404, detail=f"批改计划 '{plan_name}' 不存在")
+
+    try:
+        # 统计信息
+        records_dir = PathHelper.get_records_dir(plan_name)
+        images_dir = PathHelper.get_images_dir(plan_name)
+
+        record_count = len(list(records_dir.glob("*.json"))) if records_dir.exists() else 0
+        image_count = len(list(images_dir.glob("*.*"))) if images_dir.exists() else 0
+
+        # 删除整个计划目录
+        import shutil
+        shutil.rmtree(plan_dir)
+
+        return {
+            "message": f"批改计划 '{plan_name}' 已删除",
+            "deleted": {
+                "plan_name": plan_name,
+                "records_count": record_count,
+                "images_count": image_count
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除批改计划失败: {str(e)}")
 
 
 # ==================== 作业上传与批改 API ====================
@@ -636,6 +739,58 @@ async def delete_record(plan_name: str, record_id: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除记录失败: {str(e)}")
+
+
+@app.post("/records/{plan_name}/batch-delete")
+async def batch_delete_records(plan_name: str, request: DeleteRecordsRequest):
+    """批量删除批改记录"""
+    config_path = PathHelper.get_config_path(plan_name)
+    if not config_path.exists():
+        raise HTTPException(status_code=404, detail=f"批改计划 '{plan_name}' 不存在")
+
+    if not request.record_ids:
+        raise HTTPException(status_code=400, detail="记录 ID 列表不能为空")
+
+    deleted_count = 0
+    failed_count = 0
+    deleted_records = []
+    plan_dir = PathHelper.get_plan_dir(plan_name)
+
+    for record_id in request.record_ids:
+        try:
+            record_path = PathHelper.get_record_path(plan_name, record_id)
+            if not record_path.exists():
+                failed_count += 1
+                continue
+
+            # 读取记录以获取图片信息
+            record = load_json(record_path)
+
+            # 删除相关图片
+            for image_rel_path in record.get("images", []):
+                image_path = plan_dir / image_rel_path
+                if image_path.exists():
+                    image_path.unlink()
+
+            # 删除记录文件
+            record_path.unlink()
+
+            deleted_records.append({
+                "record_id": record_id,
+                "student": record.get("student")
+            })
+            deleted_count += 1
+
+        except Exception as e:
+            print(f"删除记录 {record_id} 失败: {e}")
+            failed_count += 1
+
+    return {
+        "message": f"成功删除 {deleted_count} 条记录，失败 {failed_count} 条",
+        "deleted_count": deleted_count,
+        "failed_count": failed_count,
+        "deleted_records": deleted_records
+    }
 
 
 # ==================== OCR + DeepSeek 批改处理 ====================

@@ -8,6 +8,14 @@ echo "  智批 - 停止脚本"
 echo "========================================"
 echo ""
 
+PORT=8000
+if [ -f ".env" ]; then
+    ENV_PORT=$(grep -E '^SERVER_PORT=' .env | tail -n1 | cut -d= -f2)
+    if [ -n "$ENV_PORT" ]; then
+        PORT="$ENV_PORT"
+    fi
+fi
+
 # 从 PID 文件读取进程 ID
 if [ -f ".server.pid" ]; then
     PID=$(cat .server.pid)
@@ -41,14 +49,14 @@ else
     echo "尝试通过端口查找进程..."
     
     # 通过端口查找进程
-    PID=$(lsof -ti:8000)
+    PID=$(lsof -ti:$PORT)
     if [ ! -z "$PID" ]; then
-        echo "找到占用 8000 端口的进程: $PID"
+        echo "找到占用 $PORT 端口的进程: $PID"
         kill $PID
         sleep 1
         
         # 检查是否还在运行
-        if lsof -ti:8000 > /dev/null 2>&1; then
+        if lsof -ti:$PORT > /dev/null 2>&1; then
             echo "强制终止进程..."
             kill -9 $PID
         fi

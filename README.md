@@ -11,7 +11,7 @@
 - 🤖 **AI 智能批改**：使用 DeepSeek AI 进行作业批改
 - 📊 **批改计划管理**：支持创建多个批改计划，每个计划可自定义批改要求
 - 💾 **本地数据存储**：所有数据本地存储，安全可靠
-- 🌐 **跨平台支持**：支持 Windows、macOS、Linux 系统
+- 🌐 **跨平台支持**：支持 macOS、Linux 系统
 
 ## 系统要求
 
@@ -19,32 +19,6 @@
 - 稳定的网络连接（用于 OCR 和 AI API 调用）
 
 ## 快速开始（一键启动）
-
-### Windows 系统
-
-1. **双击运行启动脚本**
-   ```
-   双击 scripts\start.bat
-   ```
-
-2. **首次运行时**
-   - 脚本会自动检查 Python 环境
-   - 自动创建虚拟环境
-   - 自动安装依赖包
-   - 如果没有 `.env` 配置文件，会自动创建并打开编辑器
-
-3. **填写配置**
-   - 编辑 `.env` 文件，填入你的 API 密钥（见下方"获取 API 密钥"部分）
-   - 保存后重新运行 `scripts\start.bat`
-
-4. **服务启动**
-   - 服务会自动在后台运行
-   - 浏览器会自动打开系统首页
-
-5. **停止服务**
-   ```
-   双击 scripts\stop.bat
-   ```
 
 ### macOS/Linux 系统
 
@@ -55,10 +29,9 @@
    ```
 
 2. **首次运行时**
-   - 脚本会自动检查 Python 环境
-   - 自动创建虚拟环境
-   - 自动安装依赖包
-   - 如果没有 `.env` 配置文件，会自动创建并打开编辑器
+   - 脚本自动探测 `python`/`python3`（要求 ≥ 3.8）
+   - 自动创建虚拟环境并安装依赖包
+   - 若缺少 `.env`，在无 `.env.example` 时会生成最小模板并提示编辑
 
 3. **填写配置**
    - 编辑 `.env` 文件，填入你的 API 密钥（见下方"获取 API 密钥"部分）
@@ -139,15 +112,6 @@ DATA_DIR=./data
 
 如果需要手动控制启动过程：
 
-#### Windows 系统
-```cmd
-cd path\to\demo
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-python main.py
-```
-
 #### macOS/Linux 系统
 ```bash
 cd /path/to/demo
@@ -168,9 +132,7 @@ demo/
 ├── .env                  # 环境变量配置（需自行创建）
 ├── README.md             # 项目说明文档
 ├── scripts/              # 启动和管理脚本
-│   ├── start.bat        # Windows 启动脚本
 │   ├── start.sh         # macOS/Linux 启动脚本
-│   ├── stop.bat         # Windows 停止脚本
 │   └── stop.sh          # macOS/Linux 停止脚本
 ├── static/               # 静态文件目录
 │   ├── pc.html          # 电脑端界面

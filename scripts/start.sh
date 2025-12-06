@@ -21,8 +21,12 @@ echo ""
 # ==================== 环境检查 ====================
 
 echo "[1/5] 检查 Python 环境..."
-if ! command -v python3 &> /dev/null; then
-    echo "[错误] 未检测到 Python3"
+if command -v python3 &> /dev/null; then
+    PY_CMD=python3
+elif command -v python &> /dev/null; then
+    PY_CMD=python
+else
+    echo "[错误] 未检测到 Python"
     echo ""
     echo "请安装 Python 3.8 或更高版本："
     echo ""
@@ -39,15 +43,21 @@ if ! command -v python3 &> /dev/null; then
     exit 1
 fi
 
-PYTHON_VERSION=$(python3 --version 2>&1 | awk '{print $2}')
+PYTHON_VERSION=$($PY_CMD --version 2>&1 | awk '{print $2}')
 echo "Python 版本: $PYTHON_VERSION"
+MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+if [ "$MAJOR" -lt 3 ] || { [ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 8 ]; }; then
+    echo "[错误] 需要 Python 3.8 及以上版本"
+    exit 1
+fi
 
 # 检查虚拟环境
 echo ""
 echo "[2/5] 检查虚拟环境..."
 if [ ! -d "venv" ]; then
     echo "虚拟环境不存在，正在创建..."
-    python3 -m venv venv
+    $PY_CMD -m venv venv
     if [ $? -ne 0 ]; then
         echo "[错误] 创建虚拟环境失败"
         exit 1
@@ -65,7 +75,7 @@ source venv/bin/activate
 # 检查并安装依赖
 echo ""
 echo "[4/5] 检查依赖包..."
-if ! python -c "import fastapi" &> /dev/null; then
+if ! $PY_CMD -c "import fastapi" &> /dev/null; then
     echo "依赖包未安装，正在安装..."
     pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
     if [ $? -ne 0 ]; then
@@ -95,8 +105,21 @@ if [ ! -f ".env" ]; then
         echo "配置完成后，请重新运行此脚本"
         exit 0
     else
-        echo "[错误] 未找到 .env.example 文件"
-        exit 1
+        echo "正在创建默认 .env..."
+        cat > .env << 'EOF'
+DEEPSEEK_API_KEY=
+OCR_PROVIDER=tencent
+TENCENT_SECRET_ID=
+TENCENT_SECRET_KEY=
+TENCENT_REGION=ap-guangzhou
+SERVER_PORT=8000
+DATA_DIR=./data
+EOF
+        echo ""
+        echo "[重要] 已生成默认 .env，请编辑并填入你的 API 密钥"
+        echo "文件位置: $(pwd)/.env"
+        echo "配置完成后，请重新运行此脚本"
+        exit 0
     fi
 else
     echo "配置文件已存在"
@@ -150,11 +173,11 @@ if [ "$DEBUG_MODE" = true ]; then
     } &
 
     # 前台运行，日志直接输出到终端
-    python main.py
+    $PY_CMD main.py
 else
     # 后台模式：后台运行
     echo "启动后台服务..."
-    nohup python main.py > logs/server.log 2>&1 &
+    nohup $PY_CMD main.py > logs/server.log 2>&1 &
     SERVER_PID=$!
     echo $SERVER_PID > .server.pid
 
