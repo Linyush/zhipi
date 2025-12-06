@@ -824,6 +824,12 @@
 
         // 初始化
         window.onload = function() {
+            // 配置 marked.js 支持换行
+            marked.setOptions({
+                breaks: true,  // 支持单换行符换行（GFM 风格）
+                gfm: true      // 启用 GitHub Flavored Markdown
+            });
+
             loadPlans();
             // 恢复上次的选择状态
             restoreState();
