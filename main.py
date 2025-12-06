@@ -162,6 +162,7 @@ class PlanCreate(BaseModel):
     plan_name: str
     description: str
     prompt: str
+    standard_answer: Optional[str] = ""
 
 class PromptUpdate(BaseModel):
     prompt: str
@@ -170,6 +171,7 @@ class PlanUpdate(BaseModel):
     plan_name: Optional[str] = None
     description: Optional[str] = None
     prompt: Optional[str] = None
+    standard_answer: Optional[str] = None
 
 class RegradeRequest(BaseModel):
     record_ids: Optional[List[str]] = None
@@ -325,6 +327,7 @@ async def create_plan(plan: PlanCreate):
         "plan_name": plan_name,
         "description": plan.description,
         "prompt": plan.prompt,
+        "standard_answer": plan.standard_answer or "",
         "created_at": datetime.now().isoformat()
     }
     save_json(config_path, config_data)
@@ -430,6 +433,10 @@ async def update_plan(plan_name: str, update: PlanUpdate):
         # 更新 prompt
         if update.prompt is not None:
             config["prompt"] = update.prompt
+
+        # 更新标准答案
+        if update.standard_answer is not None:
+            config["standard_answer"] = update.standard_answer
 
         # 更新计划名称（需要重命名目录）
         if update.plan_name is not None and update.plan_name != plan_name:
@@ -810,6 +817,7 @@ def process_homework(plan_name: str, record_id: str):
         # 读取批改计划配置
         config = load_json(PathHelper.get_config_path(plan_name))
         prompt = config.get("prompt", "请批改这份作业")
+        standard_answer = config.get("standard_answer", "")
 
         # 步骤 1: 使用 OCR 识别图片中的文字
         print(f"开始 OCR 识别: {plan_name}/{record_id}")
@@ -844,6 +852,12 @@ def process_homework(plan_name: str, record_id: str):
         all_text = "\n\n".join(recognized_texts)
         print(f"OCR 总共识别到 {len(all_text)} 字符")
 
+        # OCR 识别完成后立即保存，让前端可以实时显示
+        record["ocr_text"] = all_text
+        record["updated_at"] = datetime.now().isoformat()
+        save_json(record_path, record)
+        print(f"OCR 识别结果已保存: {plan_name}/{record_id}")
+
         # 步骤 2: 调用 DeepSeek API 进行批改
         if not Config.DEEPSEEK_API_KEY:
             raise Exception("DEEPSEEK_API_KEY 未配置")
@@ -853,6 +867,14 @@ def process_homework(plan_name: str, record_id: str):
 
 【学生作业内容】
 {all_text}
+"""
+
+        # 如果有标准答案，附加到提示词中
+        if standard_answer and standard_answer.strip():
+            full_prompt += f"""
+
+【参考答案/评分标准】
+{standard_answer}
 """
 
         print(f"调用 DeepSeek API 进行批改...")
