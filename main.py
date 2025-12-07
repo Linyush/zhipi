@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import Response, StreamingResponse
@@ -17,6 +18,7 @@ import qrcode
 from io import BytesIO
 import base64
 import requests
+from PIL import Image
 
 # 导入 OCR 适配器
 from ocr_adapters import create_ocr_adapter, OCRAdapter
@@ -32,6 +34,11 @@ class Config:
     # DeepSeek API 配置
     DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
     DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+
+    # Qwen API 配置（阿里云通义千问）
+    QWEN_API_KEY = os.getenv("QWEN_API_KEY", "")
+    QWEN_API_URL = os.getenv("QWEN_API_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions")
+    QWEN_MODEL = os.getenv("QWEN_MODEL", "qwen-vl-max")  # 默认使用 qwen-vl-max 多模态模型
 
     # OCR 配置
     OCR_PROVIDER = os.getenv("OCR_PROVIDER", "tencent").lower()
@@ -71,6 +78,9 @@ class Config:
 
         if not cls.DEEPSEEK_API_KEY:
             print("⚠ 警告: DEEPSEEK_API_KEY 未设置")
+
+        if not cls.QWEN_API_KEY:
+            print("⚠ 警告: QWEN_API_KEY 未设置（如需使用 Qwen 多模态批改，请配置此项）")
 
         # 初始化 OCR 适配器
         try:
@@ -163,6 +173,7 @@ class PlanCreate(BaseModel):
     description: str
     prompt: str
     standard_answer: Optional[str] = ""
+    correction_mode: Optional[str] = "ocr"  # "ocr" 或 "qwen-vl"
 
 class PromptUpdate(BaseModel):
     prompt: str
@@ -172,6 +183,7 @@ class PlanUpdate(BaseModel):
     description: Optional[str] = None
     prompt: Optional[str] = None
     standard_answer: Optional[str] = None
+    correction_mode: Optional[str] = None  # "ocr" 或 "qwen-vl"
 
 class RegradeRequest(BaseModel):
     record_ids: Optional[List[str]] = None
@@ -182,7 +194,22 @@ class DeleteRecordsRequest(BaseModel):
 
 # ==================== FastAPI 应用 ====================
 
-app = FastAPI(title="智批 - AI 作业批改系统", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    # 启动时执行
+    Config.init()
+    print("=" * 50)
+    print("🚀 智批 - AI 作业批改系统启动成功")
+    print("=" * 50)
+    yield
+    # 关闭时执行（如有需要可以在这里添加清理代码）
+
+app = FastAPI(
+    title="智批 - AI 作业批改系统",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 # CORS 中间件（允许跨域访问）
 app.add_middleware(
@@ -192,17 +219,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-# ==================== 启动事件 ====================
-
-@app.on_event("startup")
-async def startup_event():
-    """应用启动时初始化配置"""
-    Config.init()
-    print("=" * 50)
-    print("🚀 智批 - AI 作业批改系统启动成功")
-    print("=" * 50)
 
 
 # ==================== 工具函数 ====================
@@ -328,6 +344,7 @@ async def create_plan(plan: PlanCreate):
         "description": plan.description,
         "prompt": plan.prompt,
         "standard_answer": plan.standard_answer or "",
+        "correction_mode": plan.correction_mode or "ocr",  # 默认使用 OCR 模式
         "created_at": datetime.now().isoformat()
     }
     save_json(config_path, config_data)
@@ -437,6 +454,10 @@ async def update_plan(plan_name: str, update: PlanUpdate):
         # 更新标准答案
         if update.standard_answer is not None:
             config["standard_answer"] = update.standard_answer
+
+        # 更新批改模式
+        if update.correction_mode is not None:
+            config["correction_mode"] = update.correction_mode
 
         # 更新计划名称（需要重命名目录）
         if update.plan_name is not None and update.plan_name != plan_name:
@@ -652,8 +673,15 @@ async def upload_homework(
     record_path = PathHelper.get_record_path(plan_name, record_id)
     save_json(record_path, record)
 
+    # 读取批改计划配置，根据批改模式选择处理函数
+    config = load_json(config_path)
+    correction_mode = config.get("correction_mode", "ocr")
+
     # 触发后台批改任务
-    background_tasks.add_task(process_homework, plan_name, record_id)
+    if correction_mode == "qwen-vl":
+        background_tasks.add_task(process_homework_qwen_vl, plan_name, record_id)
+    else:
+        background_tasks.add_task(process_homework, plan_name, record_id)
 
     return {
         "message": "作业上传成功",
@@ -924,6 +952,220 @@ def process_homework(plan_name: str, record_id: str):
         print(f"批改失败 {plan_name}/{record_id}: {e}")
 
 
+def process_homework_qwen_vl(plan_name: str, record_id: str):
+    """后台处理作业批改（Qwen-VL 多模态直接批改）"""
+    try:
+        # 读取记录
+        record_path = PathHelper.get_record_path(plan_name, record_id)
+        record = load_json(record_path)
+
+        # 更新状态为 processing
+        record["status"] = "processing"
+        record["updated_at"] = datetime.now().isoformat()
+        save_json(record_path, record)
+
+        # 读取批改计划配置
+        config = load_json(PathHelper.get_config_path(plan_name))
+        prompt = config.get("prompt", "请批改这份作业")
+        standard_answer = config.get("standard_answer", "")
+
+        # 检查 Qwen API 配置
+        if not Config.QWEN_API_KEY:
+            raise Exception("QWEN_API_KEY 未配置")
+
+        print(f"开始 Qwen-VL 多模态批改: {plan_name}/{record_id}")
+        plan_dir = PathHelper.get_plan_dir(plan_name)
+
+        # 构建 Qwen-VL 多模态消息
+        content = []
+
+        # 系统格式要求（JSON 结构）
+        system_format_requirement = """
+【重要：输出格式要求】
+**你的回复必须是一个严格的、合法的 JSON 对象！**
+- 所有字段名必须用双引号包裹
+- 所有数值必须是纯数字（不要有中文、不要有单位）
+- bbox 坐标格式必须严格遵守：{"x": 数字, "y": 数字, "width": 数字, "height": 数字}
+- 不要在JSON中添加注释或额外的文字说明
+
+请按照以下 JSON 格式返回批改结果：
+
+```json
+{
+  "markdown_result": "批改结果的 Markdown 文本（不要用代码块包裹）",
+  "annotations": [
+    {
+      "question_number": 1,
+      "image_index": 0,
+      "bbox": {"x": 100, "y": 150, "width": 500, "height": 300},
+      "status": "correct",
+      "score": "5/5",
+      "comment": "简短评语"
+    }
+  ],
+  "recognized_content": {
+    "questions": [
+      {
+        "number": 1,
+        "question_text": "题目内容",
+        "student_answer": "学生作答内容",
+        "bbox": {"x": 100, "y": 150, "width": 500, "height": 300}
+      }
+    ]
+  }
+}
+```
+
+字段说明：
+- markdown_result: 完整的批改结果，使用 Markdown 格式
+- annotations: 每道题的标注数据
+  - question_number: 题号
+  - image_index: 图片索引（从 0 开始，0 表示第1张图片，1 表示第2张图片，以此类推）
+  - **注意**：如果一个题目横跨多张图片，请为该题目创建多个标注，每个标注对应不同的 image_index
+  - bbox: 边界框坐标，**必须是合法的JSON对象格式**，例如 {"x": 100, "y": 150, "width": 500, "height": 300}
+    - **严格要求**：每个字段名必须用双引号包裹，每个数值必须是纯数字（不要有单位、不要有中文）
+    - 坐标系统：图片左上角为原点 (0, 0)，单位是像素
+    - x: 答题区域左上角的 X 坐标（从左边缘开始的像素距离）
+    - y: 答题区域左上角的 Y 坐标（从顶部开始的像素距离）
+    - width: 答题区域的宽度（像素）
+    - height: 答题区域的高度（像素）
+    - **重要**: 请仔细观察图片中每道题的实际位置，返回准确的坐标值，不要编造或使用示例数据
+  - status: "correct"(正确) / "partial"(部分正确) / "wrong"(错误)
+  - score: 得分，如 "5/5"
+  - comment: 简短评语
+- recognized_content: AI识别到的题目和答案（也需要包含真实的 bbox 坐标，格式同上）
+
+**坐标获取方法**：
+1. 仔细观察图片中每道题目和学生答案的位置
+2. 估算该区域在图片中的像素坐标（左上角为起点）
+3. 测量该区域的宽度和高度
+4. 确保坐标值合理（例如：x 和 y 应该 > 0 且 < 图片尺寸）
+
+---
+
+【用户的批改要求】
+"""
+
+        # 组合完整提示词：系统格式要求 + 用户批改要求 + 标准答案
+        full_prompt = system_format_requirement + prompt
+
+        if standard_answer and standard_answer.strip():
+            full_prompt += f"\n\n【参考答案/评分标准】\n{standard_answer}"
+
+        content.append({
+            "type": "text",
+            "text": full_prompt
+        })
+
+        # 添加所有图片
+        for idx, image_rel_path in enumerate(record["images"], 1):
+            image_path = plan_dir / image_rel_path
+            if image_path.exists():
+                try:
+                    # 读取图片并转换为 base64
+                    with open(image_path, 'rb') as f:
+                        img_data = f.read()
+                        img_base64 = base64.b64encode(img_data).decode('utf-8')
+
+                    # 获取图片格式
+                    file_ext = image_path.suffix.lower().lstrip('.')
+                    if file_ext == 'jpg':
+                        file_ext = 'jpeg'
+
+                    # 添加图片到内容
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/{file_ext};base64,{img_base64}"
+                        }
+                    })
+                    print(f"已添加图片 {idx}: {image_rel_path}")
+                except Exception as e:
+                    print(f"读取图片失败 {idx}: {e}")
+                    raise Exception(f"读取图片 {idx} 失败: {str(e)}")
+
+        # 调用 Qwen-VL API
+        print(f"调用 Qwen-VL API 进行批改...")
+        response = requests.post(
+            Config.QWEN_API_URL,
+            headers={
+                "Authorization": f"Bearer {Config.QWEN_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": Config.QWEN_MODEL,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": content
+                    }
+                ],
+                "max_tokens": 2000,
+                "temperature": 0.7
+            },
+            timeout=90
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            correction = result["choices"][0]["message"]["content"]
+
+            # 尝试解析 JSON 格式的返回结果
+            try:
+                # 移除可能的代码块标记
+                if correction.strip().startswith("```json"):
+                    correction = correction.strip()[7:]  # 移除 ```json
+                if correction.strip().startswith("```"):
+                    correction = correction.strip()[3:]  # 移除 ```
+                if correction.strip().endswith("```"):
+                    correction = correction.strip()[:-3]  # 移除结尾的 ```
+
+                correction_data = json.loads(correction.strip())
+
+                # 提取三部分数据
+                markdown_result = correction_data.get("markdown_result", "")
+                annotations = correction_data.get("annotations", [])
+                recognized_content = correction_data.get("recognized_content", {})
+                # image_rotations 不再从AI返回中提取，默认全部为0（用户可以手动旋转）
+                image_rotations = [0] * len(record.get("images", []))
+
+                # 更新记录
+                record["status"] = "done"
+                record["result"] = markdown_result  # 批改结果 Markdown
+                record["annotations"] = annotations  # 标注数据
+                record["recognized_content"] = recognized_content  # AI 识别的内容
+                record["image_rotations"] = image_rotations  # 图片旋转角度
+                record["ocr_text"] = f"（使用 Qwen-VL 多模态批改，已直接识别 {len(record['images'])} 张图片内容）"
+                record["updated_at"] = datetime.now().isoformat()
+                save_json(record_path, record)
+                print(f"Qwen-VL 批改成功（结构化数据）: {plan_name}/{record_id}")
+
+            except json.JSONDecodeError as e:
+                # 如果解析失败，当作普通文本处理
+                print(f"警告: Qwen 返回内容不是 JSON 格式，当作普通文本处理: {e}")
+                record["status"] = "done"
+                record["ocr_text"] = f"（使用 Qwen-VL 多模态批改，已直接识别 {len(record['images'])} 张图片内容）"
+                record["result"] = correction  # 原始文本
+                record["annotations"] = []
+                record["recognized_content"] = {}
+                record["updated_at"] = datetime.now().isoformat()
+                save_json(record_path, record)
+                print(f"Qwen-VL 批改成功（文本模式）: {plan_name}/{record_id}")
+        else:
+            raise Exception(f"Qwen-VL API 调用失败: {response.status_code} - {response.text}")
+
+    except Exception as e:
+        # 标记为失败
+        try:
+            record["status"] = "failed"
+            record["error"] = str(e)
+            record["updated_at"] = datetime.now().isoformat()
+            save_json(record_path, record)
+        except Exception:
+            pass
+        print(f"Qwen-VL 批改失败 {plan_name}/{record_id}: {e}")
+
+
 # ==================== 批量重新批改 API ====================
 
 @app.post("/plans/{plan_name}/regrade")
@@ -936,6 +1178,10 @@ async def regrade_records(plan_name: str, request: RegradeRequest, background_ta
     records_dir = PathHelper.get_records_dir(plan_name)
     if not records_dir.exists():
         return {"message": "没有可批改的记录", "count": 0}
+
+    # 读取批改计划配置
+    config = load_json(config_path)
+    correction_mode = config.get("correction_mode", "ocr")
 
     # 确定要重新批改的记录
     if request.record_ids:
@@ -964,8 +1210,11 @@ async def regrade_records(plan_name: str, request: RegradeRequest, background_ta
                 record["updated_at"] = datetime.now().isoformat()
                 save_json(record_path, record)
 
-                # 触发后台批改任务
-                background_tasks.add_task(process_homework, plan_name, record_id)
+                # 触发后台批改任务（根据批改模式选择）
+                if correction_mode == "qwen-vl":
+                    background_tasks.add_task(process_homework_qwen_vl, plan_name, record_id)
+                else:
+                    background_tasks.add_task(process_homework, plan_name, record_id)
                 count += 1
             except Exception as e:
                 print(f"重新批改失败 {record_id}: {e}")
@@ -974,6 +1223,84 @@ async def regrade_records(plan_name: str, request: RegradeRequest, background_ta
         "message": f"已触发 {count} 条记录重新批改",
         "count": count
     }
+
+
+# ==================== 图片旋转 API ====================
+
+class RotateImageRequest(BaseModel):
+    record_id: str
+    image_index: int
+    rotation: int = 90  # 旋转角度：90, 180, 270
+
+
+@app.post("/plans/{plan_name}/rotate_image")
+async def rotate_image(plan_name: str, request: RotateImageRequest):
+    """旋转图片（物理旋转文件）"""
+    try:
+        # 验证旋转角度
+        if request.rotation not in [90, 180, 270]:
+            raise HTTPException(status_code=400, detail="旋转角度必须是 90, 180 或 270")
+
+        # 读取记录
+        record_path = PathHelper.get_record_path(plan_name, request.record_id)
+        if not record_path.exists():
+            raise HTTPException(status_code=404, detail=f"记录 '{request.record_id}' 不存在")
+
+        record = load_json(record_path)
+
+        # 验证图片索引
+        if request.image_index < 0 or request.image_index >= len(record.get("images", [])):
+            raise HTTPException(status_code=400, detail="图片索引无效")
+
+        # 获取图片路径
+        image_relative_path = record["images"][request.image_index]
+        image_full_path = Config.DATA_DIR / plan_name / image_relative_path
+
+        if not image_full_path.exists():
+            raise HTTPException(status_code=404, detail="图片文件不存在")
+
+        print(f"开始旋转图片: {image_full_path}")
+        print(f"旋转前文件大小: {image_full_path.stat().st_size} bytes")
+
+        # 读取图片
+        with Image.open(image_full_path) as img:
+            print(f"旋转前图片尺寸: {img.size}")
+
+            # 根据旋转角度选择正确的转换方法
+            if request.rotation == 90:
+                rotated_img = img.transpose(Image.ROTATE_270)  # 顺时针90度 = PIL的ROTATE_270
+            elif request.rotation == 180:
+                rotated_img = img.transpose(Image.ROTATE_180)
+            elif request.rotation == 270:
+                rotated_img = img.transpose(Image.ROTATE_90)  # 顺时针270度 = PIL的ROTATE_90
+            else:
+                raise HTTPException(status_code=400, detail="旋转角度必须是 90, 180 或 270")
+
+            print(f"旋转后图片尺寸: {rotated_img.size}")
+
+        # 保存旋转后的图片（覆盖原文件）
+        # 先保存到临时文件，确保写入成功后再替换原文件
+        temp_path = image_full_path.parent / f"{image_full_path.stem}_tmp{image_full_path.suffix}"
+        rotated_img.save(str(temp_path), quality=95, optimize=True)
+
+        # 确保文件写入完成后替换原文件
+        temp_path.replace(image_full_path)
+
+        print(f"旋转后文件大小: {image_full_path.stat().st_size} bytes")
+        print(f"图片旋转成功: {plan_name}/{request.record_id} 图片{request.image_index} 旋转{request.rotation}度")
+
+        return {
+            "message": "图片旋转成功",
+            "image_index": request.image_index,
+            "rotation": request.rotation,
+            "timestamp": int(time.time() * 1000)  # 返回时间戳用于刷新缓存
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"旋转图片失败: {e}")
+        raise HTTPException(status_code=500, detail=f"旋转图片失败: {str(e)}")
 
 
 # ==================== 静态文件服务 ====================

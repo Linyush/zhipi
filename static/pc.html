@@ -686,6 +686,47 @@
             font-size: 14px;
             z-index: 1001;
         }
+
+        .image-viewer-rotate-btn,
+        .image-viewer-confirm-btn {
+            background: rgba(255, 152, 0, 0.9);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .image-viewer-rotate-btn:hover,
+        .image-viewer-confirm-btn:hover {
+            background: rgba(255, 152, 0, 1);
+            transform: scale(1.05);
+        }
+
+        .image-viewer-confirm-btn {
+            background: rgba(76, 175, 80, 0.9);
+        }
+
+        .image-viewer-confirm-btn:hover {
+            background: rgba(76, 175, 80, 1);
+        }
+
+        /* Loading Spinner 样式 */
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
@@ -732,13 +773,20 @@
 
             <!-- 上部：基本信息 -->
             <div style="display: flex; gap: 20px; margin-bottom: 15px;">
-                <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                <div class="form-group" style="flex: 2; margin-bottom: 0;">
                     <label><span style="color: red;">*</span> 计划名称</label>
                     <input type="text" id="newPlanName" placeholder="例如：语文作业第一单元">
                 </div>
-                <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                <div class="form-group" style="flex: 2; margin-bottom: 0;">
                     <label>描述</label>
                     <input type="text" id="newPlanDescription" placeholder="简短描述（可选）">
+                </div>
+                <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                    <label>批改模式</label>
+                    <select id="newPlanCorrectionMode" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                        <option value="ocr">OCR + AI</option>
+                        <option value="qwen-vl">Qwen-VL 多模态</option>
+                    </select>
                 </div>
             </div>
 
@@ -781,7 +829,14 @@
             <button class="image-viewer-close" onclick="closeImageViewer()">✕</button>
             <button class="image-viewer-nav image-viewer-prev" onclick="prevImage()">‹</button>
             <button class="image-viewer-nav image-viewer-next" onclick="nextImage()">›</button>
-            <img id="imageViewerImg" src="" alt="作业图片">
+            <div id="imageViewerWrapper" style="position: relative; display: inline-block;">
+                <img id="imageViewerImg" src="" alt="作业图片">
+                <canvas id="imageViewerCanvas" style="position: absolute; top: 0; left: 0; pointer-events: none;"></canvas>
+            </div>
+            <div style="position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 1001;">
+                <button class="image-viewer-rotate-btn" onclick="rotateCurrentImage()">🔄 旋转 90°</button>
+                <button class="image-viewer-confirm-btn" onclick="confirmRotation()" style="display: none;">✓ 确定旋转</button>
+            </div>
             <div class="image-viewer-counter">
                 <span id="imageViewerCounter">1 / 1</span>
             </div>
@@ -821,6 +876,11 @@
         // 图片浏览器相关变量
         let currentImages = []; // 当前记录的所有图片
         let currentImageIndex = 0; // 当前显示的图片索引
+        let currentAnnotations = []; // 当前记录的标注数据
+        let currentImageRotations = []; // 当前记录的旋转角度
+        let currentRecordId = ''; // 当前记录ID
+        let currentPlanName = ''; // 当前批改计划名称
+        let pendingRotation = 0; // 待提交的旋转角度（0, 90, 180, 270）
 
         // 初始化
         window.onload = function() {
@@ -1120,17 +1180,51 @@
         function generateDetailHTML(record, recordId) {
             let html = '<div class="detail-grid">';
 
-            // 第一列：批改结果（最大）
+            // 第一列：批改结果（根据状态显示不同标题和内容）
             html += '<div class="detail-column detail-column-result">';
-            html += '<div class="detail-column-title">✅ 批改结果</div>';
-            html += '<div class="detail-column-content">';
-            if (record.result) {
-                html += `<div class="result-content">${marked.parse(record.result)}</div>`;
-            } else if (record.error) {
-                html += `<div style="color: red;"><strong>错误:</strong> ${record.error}</div>`;
+
+            // 根据状态设置标题
+            let titleHtml = '';
+            if (record.status === 'done') {
+                titleHtml = '✅ 批改结果';
+            } else if (record.status === 'failed') {
+                titleHtml = '❌ 批改失败';
+            } else if (record.status === 'processing') {
+                titleHtml = '⏳ 批改中...';
             } else {
-                html += '<div style="color: #999;">暂无批改结果</div>';
+                titleHtml = '⏳ 等待批改';
             }
+            html += `<div class="detail-column-title">${titleHtml}</div>`;
+
+            html += '<div class="detail-column-content">';
+
+            // 根据状态显示内容
+            if (record.status === 'done' && record.result) {
+                html += `<div class="result-content">${marked.parse(record.result)}</div>`;
+            } else if (record.status === 'failed') {
+                html += `<div style="color: red; padding: 20px; text-align: center;">`;
+                html += `<div style="font-size: 48px; margin-bottom: 10px;">❌</div>`;
+                html += `<div style="font-size: 16px; font-weight: bold; margin-bottom: 10px;">批改失败</div>`;
+                if (record.error) {
+                    html += `<div style="color: #666; font-size: 14px;">${record.error}</div>`;
+                }
+                html += `</div>`;
+            } else if (record.status === 'processing') {
+                html += `<div style="padding: 40px; text-align: center;">`;
+                html += `<div class="loading-spinner" style="margin: 0 auto 20px;"></div>`;
+                html += `<div style="font-size: 16px; color: #666;">正在批改中，请稍候...</div>`;
+                if (record.ocr_text && !record.ocr_text.includes('使用 Qwen-VL')) {
+                    html += `<div style="margin-top: 15px; font-size: 14px; color: #999;">已完成文字识别，正在调用 AI 批改</div>`;
+                }
+                html += `</div>`;
+            } else {
+                // pending 状态
+                html += `<div style="padding: 40px; text-align: center;">`;
+                html += `<div style="font-size: 48px; margin-bottom: 10px;">⏳</div>`;
+                html += `<div style="font-size: 16px; color: #666;">等待批改...</div>`;
+                html += `</div>`;
+            }
+
             html += '</div></div>';
 
             // 第二列：图片 + 识别内容
@@ -1145,19 +1239,51 @@
                 const imageUrls = record.images.map(img => `${API_BASE}/data/${currentPlan.plan_name}/${img}`);
                 const imageUrlsJson = JSON.stringify(imageUrls).replace(/"/g, '&quot;');
 
+                // 传递 annotations 数据
+                const annotationsJson = JSON.stringify(record.annotations || []).replace(/"/g, '&quot;');
+
+                // 传递 image_rotations 数据（如果有的话）
+                const imageRotationsJson = JSON.stringify(record.image_rotations || []).replace(/"/g, '&quot;');
+
                 record.images.forEach((img, index) => {
                     const imgUrl = `${API_BASE}/data/${currentPlan.plan_name}/${img}`;
-                    html += `<img src="${imgUrl}" onclick="event.stopPropagation(); openImageViewer(JSON.parse('${imageUrlsJson}'), ${index})" alt="作业图片" title="点击查看大图">`;
+                    html += `<img id="thumbnail-${record.id}-${index}" src="${imgUrl}" onclick="event.stopPropagation(); openImageViewer(JSON.parse('${imageUrlsJson}'), ${index}, JSON.parse('${annotationsJson}'), JSON.parse('${imageRotationsJson}'), '${record.id}', '${currentPlan.plan_name}')" alt="作业图片" title="点击查看大图（含标注）">`;
                 });
                 html += '</div>';
             } else {
                 html += '<div style="color: #999; margin-bottom: 15px;">无图片</div>';
             }
 
+            // 如果有标注数据，显示标注列表
+            if (record.annotations && record.annotations.length > 0) {
+                html += '<div style="margin-top: 15px; padding: 10px; background: #fff3cd; border-radius: 4px; border-left: 3px solid #ffc107;">';
+                html += '<div style="font-size: 12px; font-weight: bold; color: #856404; margin-bottom: 8px;">📍 批改标注</div>';
+                record.annotations.forEach((ann, idx) => {
+                    let statusColor = ann.status === 'correct' ? '#28a745' : (ann.status === 'partial' ? '#ff9800' : '#dc3545');
+                    let statusIcon = ann.status === 'correct' ? '✓' : (ann.status === 'partial' ? '△' : '✗');
+                    html += `<div style="font-size: 11px; color: #666; margin-bottom: 5px;">`;
+                    html += `<span style="color: ${statusColor}; font-weight: bold;">${statusIcon} 题${ann.question_number}</span> `;
+                    html += `<span style="color: #999;">${ann.score}</span> - ${ann.comment}`;
+                    html += `</div>`;
+                });
+                html += '</div>';
+            }
+
             // 识别内容
             html += '<div class="ocr-content">';
-            html += '<div class="ocr-content-title">图片内容识别</div>';
-            if (record.ocr_text) {
+            html += '<div class="ocr-content-title">AI 识别的内容</div>';
+
+            // 优先显示结构化的识别内容
+            if (record.recognized_content && record.recognized_content.questions && record.recognized_content.questions.length > 0) {
+                record.recognized_content.questions.forEach((q, idx) => {
+                    html += `<div style="margin-bottom: 15px; padding: 10px; background: white; border-radius: 4px; border-left: 3px solid #2196F3;">`;
+                    html += `<div style="font-weight: bold; color: #2196F3; margin-bottom: 5px;">题目 ${q.number}</div>`;
+                    html += `<div style="font-size: 12px; color: #666; margin-bottom: 5px;"><strong>题目：</strong>${q.question_text}</div>`;
+                    html += `<div style="font-size: 12px; color: #333;"><strong>学生答案：</strong>${q.student_answer}</div>`;
+                    html += `</div>`;
+                });
+            } else if (record.ocr_text) {
+                // 回退到 OCR 文本
                 html += `<pre>${record.ocr_text}</pre>`;
             } else {
                 html += '<div style="color: #999; font-size: 12px;">暂无识别结果</div>';
@@ -1421,61 +1547,31 @@
             document.getElementById('newPlanName').value = '';
             document.getElementById('newPlanDescription').value = '';
             document.getElementById('newPlanStandardAnswer').value = '';
+            document.getElementById('newPlanCorrectionMode').value = 'ocr';  // 默认使用 OCR 模式
 
             // 设置默认 Prompt
             const defaultPrompt = `角色设定：
 你是一名专业、严谨、耐心的「道法（道德与法治）作业批改老师」，熟悉义务教育阶段道德与法治课程标准与答题要求。
 
 任务说明：
-我将提供 OCR 识别后的作业文字。请你执行以下步骤：
+我将提供图片给你，包含印刷体题目和手写体答案。请你执行以下步骤：
 
-1. 文本整理
-   - 按题号顺序整理提供的文本
-   - 明确区分每道题的"题目内容"和"学生答案"
-   - 保留题号、分段和原有书写逻辑
-   - 不随意改写原文
 
-2. 批改要求
-   - 判断每题答案：正确 / 部分正确 / 错误
-   - 给出简短建议或标准答案
-   - 语言简洁、适合中小学生理解
-   - 保持耐心、鼓励、尊重的老师口吻
-
-3. 输出结构(markdown 格式，格式清晰，每道题之间有换行)
-
-一、每道题批改结果（直接输出每题）
-题目1：正确/部分正确/错误(正确使用绿色字体，部分正确使用橙色字体，错误使用暗红色字体)
-学生答案：xxx
-标准答案 / 建议：xxx
-
-题目2：正确/部分正确/错误(正确使用绿色字体，部分正确使用黄色字体，错误使用红色字体)
-学生答案：xxx
-标准答案 / 建议：xxx
-...
-
-二、综合分析
-正确之处：
-1. ...
-2. ...
-
-存在问题：
-1. ...
-2. ...
-
-改进建议：
-1. ...
-2. ...
-
-4. 评分（可选）
-- 按 100 分制给分
-- 等级：A / B / C / D
-- 简述扣分原因
-
-5. 语言风格
-- 老师批改口吻
-- 先肯定亮点，再指出问题，再给修改建议
-- 文字清晰、简洁、有逻辑
-- 注意区分题目和答案，不要混淆`;
+批改要求，所有要求一定要遵守：
+1. 按照题目和步骤一行一行输出内容
+2. 题目和步骤都需要输出 {得分}/{总分}
+3.没有得满分的，需要写出扣分原因
+4.没有给出标准答案的题目不要批改
+5.\${xxx}这个格式是我告诉你输出内容的占位符，你输出的时候，需要忽略 \${}，按照里面的内容给就好
+6.对于步骤占位符里面的内容，你需要从标准答案中提取，提取关键内容即可，尽量 3~5 个字，不用把完整步骤内容写进去,此条必须遵守
+7.如果题目分了小题目，则按照层级关系输出，题目、子题目、步骤等等这种层级关系
+8.严格按照以下输出形式输出 markdown 内容，不要出现任何其他内容
+输出格式
+#\${题目n}：\${总得分}/\${题目总分}
+## \${子题目n}：\${小点得分}/\${小点总分}
+** \${步骤1}**：\${步骤得分}/\${步骤总分}\${扣分原因或者给分原因}
+** \${步骤2}**：\${步骤得分}/\${步骤总分} \${扣分原因或者给分原因}
+...`;
 
             document.getElementById('newPlanPrompt').value = defaultPrompt;
             showModal('createPlanModal');
@@ -1496,6 +1592,7 @@
             document.getElementById('newPlanDescription').value = currentPlan.description;
             document.getElementById('newPlanPrompt').value = currentPlan.prompt;
             document.getElementById('newPlanStandardAnswer').value = currentPlan.standard_answer || '';
+            document.getElementById('newPlanCorrectionMode').value = currentPlan.correction_mode || 'ocr';  // 加载批改模式
 
             showModal('createPlanModal');
         }
@@ -1507,6 +1604,7 @@
             const description = document.getElementById('newPlanDescription').value.trim();
             const prompt = document.getElementById('newPlanPrompt').value.trim();
             const standardAnswer = document.getElementById('newPlanStandardAnswer').value.trim();
+            const correctionMode = document.getElementById('newPlanCorrectionMode').value;
 
             // 只验证必填项
             if (!name || !prompt) {
@@ -1524,7 +1622,8 @@
                             plan_name: name,
                             description: description,
                             prompt: prompt,
-                            standard_answer: standardAnswer
+                            standard_answer: standardAnswer,
+                            correction_mode: correctionMode
                         })
                     });
 
@@ -1555,7 +1654,8 @@
                             plan_name: name !== originalName ? name : undefined,
                             description: description,
                             prompt: prompt,
-                            standard_answer: standardAnswer
+                            standard_answer: standardAnswer,
+                            correction_mode: correctionMode
                         })
                     });
 
@@ -1730,9 +1830,19 @@
         // ==================== 图片浏览器功能 ====================
 
         // 打开图片浏览器
-        function openImageViewer(images, index) {
+        function openImageViewer(images, index, annotations = [], imageRotations = [], recordId = '', planName = '') {
             currentImages = images;
             currentImageIndex = index;
+            currentAnnotations = annotations;
+            currentImageRotations = imageRotations;
+            currentRecordId = recordId;
+            currentPlanName = planName || (currentPlan ? currentPlan.plan_name : '');
+            pendingRotation = 0;  // 重置待提交的旋转角度
+
+            // 隐藏确定按钮
+            const confirmBtn = document.querySelector('.image-viewer-confirm-btn');
+            if (confirmBtn) confirmBtn.style.display = 'none';
+
             updateImageViewer();
             document.getElementById('imageViewerModal').classList.add('active');
         }
@@ -1742,11 +1852,18 @@
             document.getElementById('imageViewerModal').classList.remove('active');
             currentImages = [];
             currentImageIndex = 0;
+            currentAnnotations = [];
+            currentImageRotations = [];
+            pendingRotation = 0;  // 重置待提交的旋转角度
         }
 
         // 上一张图片
         function prevImage() {
             if (currentImageIndex > 0) {
+                pendingRotation = 0;  // 切换图片时重置旋转
+                const confirmBtn = document.querySelector('.image-viewer-confirm-btn');
+                if (confirmBtn) confirmBtn.style.display = 'none';
+
                 currentImageIndex--;
                 updateImageViewer();
             }
@@ -1755,6 +1872,10 @@
         // 下一张图片
         function nextImage() {
             if (currentImageIndex < currentImages.length - 1) {
+                pendingRotation = 0;  // 切换图片时重置旋转
+                const confirmBtn = document.querySelector('.image-viewer-confirm-btn');
+                if (confirmBtn) confirmBtn.style.display = 'none';
+
                 currentImageIndex++;
                 updateImageViewer();
             }
@@ -1763,12 +1884,32 @@
         // 更新图片浏览器显示
         function updateImageViewer() {
             const img = document.getElementById('imageViewerImg');
+            const canvas = document.getElementById('imageViewerCanvas');
             const counter = document.getElementById('imageViewerCounter');
             const prevBtn = document.querySelector('.image-viewer-prev');
             const nextBtn = document.querySelector('.image-viewer-next');
+            const wrapper = document.getElementById('imageViewerWrapper');
 
-            // 更新图片
-            img.src = currentImages[currentImageIndex];
+            // 更新图片（添加时间戳避免缓存）
+            const timestamp = Date.now();
+            img.src = currentImages[currentImageIndex] + '?t=' + timestamp;
+
+            // 应用待提交的旋转角度
+            if (pendingRotation > 0) {
+                wrapper.style.transform = `rotate(${pendingRotation}deg)`;
+            } else {
+                wrapper.style.transform = '';
+            }
+
+            // 等待图片加载完成后绘制标注
+            img.onload = function() {
+                // 设置 Canvas 尺寸与图片一致
+                canvas.width = img.width;
+                canvas.height = img.height;
+
+                // 绘制标注
+                drawAnnotations(canvas, img);
+            };
 
             // 更新计数器
             counter.textContent = `${currentImageIndex + 1} / ${currentImages.length}`;
@@ -1776,6 +1917,147 @@
             // 更新按钮状态
             prevBtn.disabled = currentImageIndex === 0;
             nextBtn.disabled = currentImageIndex === currentImages.length - 1;
+        }
+
+        // 旋转当前图片（仅预览）
+        function rotateCurrentImage() {
+            // 累加旋转角度
+            pendingRotation = (pendingRotation + 90) % 360;
+
+            // 应用CSS旋转预览
+            const wrapper = document.getElementById('imageViewerWrapper');
+            if (pendingRotation > 0) {
+                wrapper.style.transform = `rotate(${pendingRotation}deg)`;
+            } else {
+                wrapper.style.transform = '';
+            }
+
+            // 显示确定按钮
+            const confirmBtn = document.querySelector('.image-viewer-confirm-btn');
+            if (pendingRotation > 0) {
+                confirmBtn.style.display = 'block';
+            } else {
+                confirmBtn.style.display = 'none';
+            }
+
+            console.log('预览旋转:', pendingRotation, '度');
+        }
+
+        // 确定旋转并提交
+        async function confirmRotation() {
+            if (!currentRecordId || !currentPlanName || pendingRotation === 0) {
+                return;
+            }
+
+            try {
+                console.log('提交旋转:', { currentPlanName, currentRecordId, currentImageIndex, rotation: pendingRotation });
+
+                // 调用后端 API 物理旋转文件
+                const response = await fetch(`${API_BASE}/plans/${encodeURIComponent(currentPlanName)}/rotate_image`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        record_id: currentRecordId,
+                        image_index: currentImageIndex,
+                        rotation: pendingRotation
+                    })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('后端旋转成功:', result);
+
+                    // 刷新整个页面以获取最新结果
+                    location.reload();
+                } else {
+                    const errorText = await response.text();
+                    console.error('后端旋转失败:', response.status, errorText);
+                    showAlert('旋转失败: ' + errorText, '错误');
+                }
+
+            } catch (error) {
+                console.error('旋转图片失败:', error);
+                showAlert('旋转失败: ' + error.message, '错误');
+            }
+        }
+
+        // 绘制标注到 Canvas
+        function drawAnnotations(canvas, img) {
+            if (!currentAnnotations || currentAnnotations.length === 0) {
+                return;
+            }
+
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 获取图片的实际显示尺寸和原始尺寸
+            const displayWidth = img.width;
+            const displayHeight = img.height;
+            const naturalWidth = img.naturalWidth;
+            const naturalHeight = img.naturalHeight;
+
+            // 计算缩放比例
+            const scaleX = displayWidth / naturalWidth;
+            const scaleY = displayHeight / naturalHeight;
+
+            // 只绘制属于当前图片的标注
+            const currentImageAnnotations = currentAnnotations.filter(annotation => {
+                // 如果标注没有 image_index 字段，默认为第0张图片
+                const imageIndex = annotation.image_index !== undefined ? annotation.image_index : 0;
+                return imageIndex === currentImageIndex;
+            });
+
+            // 遍历当前图片的标注
+            currentImageAnnotations.forEach(annotation => {
+                const bbox = annotation.bbox;
+                if (!bbox) return;
+
+                // 将原始坐标转换为显示坐标
+                const x = bbox.x * scaleX;
+                const y = bbox.y * scaleY;
+                const width = bbox.width * scaleX;
+                const height = bbox.height * scaleY;
+
+                // 根据状态选择颜色
+                let color, bgColor, icon;
+                if (annotation.status === 'correct') {
+                    color = '#28a745';
+                    bgColor = 'rgba(40, 167, 69, 0.1)';
+                    icon = '✓';
+                } else if (annotation.status === 'partial') {
+                    color = '#ff9800';
+                    bgColor = 'rgba(255, 152, 0, 0.1)';
+                    icon = '△';
+                } else {
+                    color = '#dc3545';
+                    bgColor = 'rgba(220, 53, 69, 0.1)';
+                    icon = '✗';
+                }
+
+                // 绘制半透明背景
+                ctx.fillStyle = bgColor;
+                ctx.fillRect(x, y, width, height);
+
+                // 绘制矩形框
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 3;
+                ctx.strokeRect(x, y, width, height);
+
+                // 绘制标签背景
+                const labelText = `${icon} 题${annotation.question_number} ${annotation.score}`;
+                ctx.font = 'bold 16px Arial';
+                const textMetrics = ctx.measureText(labelText);
+                const labelWidth = textMetrics.width + 16;
+                const labelHeight = 28;
+
+                ctx.fillStyle = color;
+                ctx.fillRect(x, y - labelHeight, labelWidth, labelHeight);
+
+                // 绘制标签文字
+                ctx.fillStyle = 'white';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(labelText, x + 8, y - labelHeight / 2);
+            });
         }
 
         // 键盘事件处理
